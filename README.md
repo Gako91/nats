@@ -22,14 +22,38 @@ This repository follows the usual layout for a V library module:
 
 ```text
 .
-├── v.mod            # module metadata
-├── nats.v           # core NATS client API, module nats
-├── jetstream.v      # JetStream API, same module nats
-├── nats_test.v      # unit tests for the module
-└── examples/        # standalone example programs using import nats
+├── v.mod
+├── nats.v                    # root module marker / public package entry
+├── options.v                 # connection options
+├── client.v                  # Client type and state
+├── connection.v              # connect, close, flush, socket I/O
+├── protocol.v                # NATS protocol constants and CONNECT payload
+├── parser.v                  # INFO and MSG parsing
+├── publish.v                 # publish helpers
+├── subscribe.v               # subscribe, unsubscribe, next_msg
+├── request.v                 # request/reply and inbox generation
+├── message.v                 # Msg type
+├── subscription.v            # Subscription type
+├── server_info.v             # Server INFO model
+├── errors.v                  # validation and URL helpers
+├── jetstream.v               # JetStream context
+├── jetstream_api.v           # JetStream API request helper
+├── jetstream_stream.v        # stream operations
+├── jetstream_publish.v       # JetStream publish acknowledgements
+├── jetstream_consumer.v      # reserved for consumer management
+├── jetstream_kv.v            # reserved for KV helpers
+├── jetstream_objectstore.v   # reserved for object store helpers
+├── nats_test.v
+├── docker-compose.yml         # local NATS server for integration tests
+├── tests/                     # optional integration tests
+└── examples/
+    ├── basic.v
+    ├── echo_service.v
+    ├── request_reply.v
+    └── jetstream.v
 ```
 
-There is intentionally no `src/` directory. In V, simple reusable modules commonly keep their `.v` files next to `v.mod`. Subdirectories are best reserved for examples, tests, documentation, or true V submodules.
+There is intentionally no `src/` directory. In V, simple reusable modules commonly keep their `.v` files next to `v.mod`. Each file above uses `module nats`, so consumers still use a single import: `import nats`.
 
 ## Example
 
@@ -43,8 +67,8 @@ fn main() {
 	defer { nc.close() }
 
 	sub := nc.subscribe('demo.hello')!
-	nc.publish_string('demo.hello', 'hello from V')!
 	nc.flush()!
+	nc.publish_string('demo.hello', 'hello from V')!
 
 	msg := nc.next_msg()!
 	assert msg.sid == sub.sid
@@ -54,10 +78,18 @@ fn main() {
 
 ## Request/reply
 
-See `examples/request_reply.v`:
+See `examples/request_reply.v`. It requires a responder; start `examples/echo_service.v` in another terminal first:
+
+```sh
+v run examples/echo_service.v
+v run examples/request_reply.v
+```
 
 ```v
-reply := nc.request_string('service.echo', 'ping', 2 * time.second)!
+reply := nc.request_string('service.echo', 'ping', 2 * time.second) or {
+	eprintln('request failed: ${err}')
+	return
+}
 println(reply.text())
 ```
 
@@ -84,4 +116,11 @@ Format/check the module with:
 ```sh
 v fmt -w .
 v test .
+```
+
+Run optional integration tests against a local NATS server:
+
+```sh
+docker compose up -d
+NATS_INTEGRATION=1 v test tests
 ```

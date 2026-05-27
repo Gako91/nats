@@ -7,8 +7,8 @@ fn main() {
 	defer { nc.close() }
 
 	sub := nc.subscribe('demo.hello')!
-	nc.publish_string('demo.hello', 'hello from V')!
 	nc.flush()!
+	nc.publish_string('demo.hello', 'hello from V')!
 
 	msg := nc.next_msg()!
 	assert msg.sid == sub.sid
