@@ -36,7 +36,7 @@ pub mut:
 	server_name   string @[json: server_name]
 	version       string
 	proto         int
-	go            string
+	go_version    string @[json: go]
 	host          string
 	port          int
 	headers       bool
@@ -262,7 +262,7 @@ fn (mut nc Client) send_connect() ! {
 		version:       '0.1.0'
 		protocol:      1
 		echo:          !nc.opts.no_echo
-		no_responders: true
+		no_responders: false
 	}
 	nc.write('CONNECT ${json.encode(payload)}${crlf}')!
 	return
