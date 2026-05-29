@@ -6,7 +6,7 @@ pub mut:
 	server_name   string @[json: server_name]
 	version       string
 	proto         int
-	go_version    string @[json: go]
+	go_version    string @[json: 'go']
 	host          string
 	port          int
 	headers       bool

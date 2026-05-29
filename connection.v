@@ -35,7 +35,7 @@ pub fn (mut nc Client) close() {
 	}
 }
 
-pub fn (mut nc Client) flush() ! {
+fn (mut nc Client) flush_old() ! {
 	nc.write('PING${crlf}')!
 	for {
 		line := nc.read_line()!
@@ -56,6 +56,36 @@ pub fn (mut nc Client) flush() ! {
 		if line.starts_with('MSG ') {
 			nc.parse_msg(line) or {}
 			continue
+		}
+	}
+}
+
+pub fn (mut nc Client) flush() ! {
+	nc.write('PING${crlf}')!
+
+	for {
+		line := nc.read_line()!
+
+		op := line.all_before(' ')
+
+		match op {
+			'PONG' {
+				return
+			}
+			'PING' {
+				nc.write('PONG${crlf}')!
+			}
+			'-ERR' {
+				return error(line)
+			}
+			'INFO' {
+				payload := line.all_after(' ')
+				nc.parse_info(payload) or {}
+			}
+			'MSG' {
+				nc.parse_msg(line) or {}
+			}
+			else {}
 		}
 	}
 }

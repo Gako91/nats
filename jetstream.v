@@ -12,7 +12,7 @@ pub:
 pub struct ApiError {
 pub:
 	code        int
-	err_code    int @[json: err_code]
+	err_code    int @[json: 'err_code']
 	description string
 }
 
