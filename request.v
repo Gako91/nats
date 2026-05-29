@@ -14,12 +14,20 @@ pub fn (mut nc Client) request(subject string, data []u8, timeout time.Duration)
 		nc.unsubscribe(sub) or {}
 	}
 	for {
-		msg := nc.next_msg()!
+		msg := nc.next_msg() or {
+			if is_timeout_error(err) {
+				return error(err_request_timeout)
+			}
+			return err
+		}
 		if msg.sid == sub.sid || msg.subject == inbox {
+			if msg.is_no_responders() {
+				return error(err_no_responders)
+			}
 			return msg
 		}
 	}
-	return error('request timed out')
+	return error(err_request_timeout)
 }
 
 pub fn (mut nc Client) request_string(subject string, data string, timeout time.Duration) !Msg {

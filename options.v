@@ -9,5 +9,7 @@ pub mut:
 	verbose         bool
 	pedantic        bool
 	no_echo         bool
+	headers         bool          = true
+	no_responders   bool          = true
 	connect_timeout time.Duration = 2 * time.second
 }

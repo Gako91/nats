@@ -5,7 +5,7 @@ Integration tests require a running NATS server. They are disabled by default so
 Start NATS with JetStream enabled:
 
 ```sh
-docker compose up -d
+docker compose -f docker-compose.yml up -d
 ```
 
 Run integration tests:
@@ -23,5 +23,5 @@ NATS_INTEGRATION=1 NATS_URL=nats://127.0.0.1:4222 v test tests
 Stop the server:
 
 ```sh
-docker compose down
+docker compose -f docker-compose.yml down
 ```

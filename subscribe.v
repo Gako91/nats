@@ -32,29 +32,43 @@ pub fn (mut nc Client) unsubscribe(sub Subscription) ! {
 }
 
 pub fn (mut nc Client) next_msg() !Msg {
+	if nc.pending_msgs.len > 0 {
+		msg := nc.pending_msgs[0]
+		nc.pending_msgs.delete(0)
+		return msg
+	}
+
 	for {
 		line := nc.read_line()!
 		if line == '' {
 			continue
 		}
-		if line == 'PING' {
-			nc.write('PONG${crlf}')!
-			continue
+		frame := parse_protocol_line(line)
+		match frame.op {
+			.ping {
+				nc.write('PONG${crlf}')!
+				continue
+			}
+			.pong, .ok {
+				continue
+			}
+			.err {
+				return error(frame.raw)
+			}
+			.info {
+				nc.parse_info(frame.payload) or {}
+				continue
+			}
+			.msg {
+				return nc.parse_msg(frame.raw)!
+			}
+			.hmsg {
+				return nc.parse_hmsg(frame.raw)!
+			}
+			.unknown {
+				return error('unexpected NATS protocol line: ${frame.raw}')
+			}
 		}
-		if line == 'PONG' || line.starts_with('+OK') {
-			continue
-		}
-		if line.starts_with('-ERR') {
-			return error(line)
-		}
-		if line.starts_with('INFO ') {
-			nc.parse_info(line[5..]) or {}
-			continue
-		}
-		if line.starts_with('MSG ') {
-			return nc.parse_msg(line)!
-		}
-		return error('unexpected NATS protocol line: ${line}')
 	}
-	return error('connection closed')
+	return error(err_connection_closed)
 }

@@ -12,9 +12,11 @@ Early development. The current implementation provides a small synchronous clien
 - NATS protocol handshake (`INFO`, `CONNECT`, `PING`/`PONG`)
 - `publish`, `subscribe`, `unsubscribe`, `flush`
 - request/reply helper using an auto-generated `_INBOX.*`
+- headers / `HMSG` parsing and no-responders handling
+- server `max_payload` checks before publish
 - basic JetStream context with stream create/update/info/delete and publish acknowledgements
 
-Not implemented yet: TLS, authentication, reconnect logic, async dispatch callbacks, headers, consumer management, pull subscriptions and object/key-value helpers.
+Not implemented yet: TLS, authentication, reconnect logic, async dispatch callbacks, consumer management, pull subscriptions and object/key-value helpers.
 
 ## Project layout
 
@@ -44,8 +46,10 @@ This repository follows the usual layout for a V library module:
 ├── jetstream_kv.v            # reserved for KV helpers
 ├── jetstream_objectstore.v   # reserved for object store helpers
 ├── nats_test.v
+├── protocol_test.v
 ├── docker-compose.yml         # local NATS server for integration tests
 ├── tests/                     # optional integration tests
+├── benchmarks/                # standalone benchmark programs
 └── examples/
     ├── basic.v
     ├── echo_service.v
@@ -121,6 +125,12 @@ v test .
 Run optional integration tests against a local NATS server:
 
 ```sh
-docker compose up -d
+docker compose -f docker-compose.yml up -d
 NATS_INTEGRATION=1 v test tests
+```
+
+Run the basic benchmark:
+
+```sh
+v run benchmarks/publish.v
 ```

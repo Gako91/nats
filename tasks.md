@@ -15,13 +15,13 @@
 
 ## Phase 2 — protocol hardening
 
-- [ ] robust parser
-- [ ] max_payload checks
-- [ ] typed/consistent errors
-- [ ] headers / HMSG
-- [ ] no responders
-- [ ] request timeout behavior
-- [ ] benchmarks
+- [x] robust parser
+- [x] max_payload checks
+- [x] typed/consistent errors
+- [x] headers / HMSG
+- [x] no responders
+- [x] request timeout behavior
+- [x] benchmarks
 
 ## Phase 3 — connection quality
 

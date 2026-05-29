@@ -1,5 +1,18 @@
 module nats
 
+pub const err_connection_closed = 'nats: connection closed'
+pub const err_no_responders = 'nats: no responders available for request'
+pub const err_request_timeout = 'nats: request timed out'
+
+fn err_max_payload(payload_size int, max_payload int) string {
+	return 'nats: payload size ${payload_size} exceeds server max_payload ${max_payload}'
+}
+
+fn is_timeout_error(err IError) bool {
+	msg := err.msg()
+	return msg.contains('timed out') || msg.contains('timeout')
+}
+
 fn address_from_url(raw string) !string {
 	mut url := raw
 	if url == '' {
