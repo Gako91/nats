@@ -8,7 +8,7 @@ The project focuses on simplicity, performance and idiomatic V APIs, while progr
 
 Early development. The current implementation provides a small synchronous client:
 
-- TCP connection to a `nats://` server
+- TCP connection to a `nats://` server with high-performance custom input buffering (reducing syscalls)
 - NATS protocol handshake (`INFO`, `CONNECT`, `PING`/`PONG`)
 - `publish`, `subscribe`, `unsubscribe`, `flush`
 - request/reply helper using an auto-generated `_INBOX.*`

@@ -10,6 +10,10 @@ mut:
 	subs         map[string]Subscription
 	pending_msgs []Msg
 	connected    bool
+	// Buffer fields for socket reading
+	rx_buf       []u8
+	rx_offset    int
+	rx_len       int
 pub mut:
 	info ServerInfo
 	opts Options

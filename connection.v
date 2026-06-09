@@ -17,9 +17,12 @@ pub fn connect_with_options(opts Options) !Client {
 	conn.set_write_timeout(opts.connect_timeout)
 
 	mut nc := Client{
-		conn: conn
-		opts: opts
-		subs: map[string]Subscription{}
+		conn:      conn
+		opts:      opts
+		subs:      map[string]Subscription{}
+		rx_buf:    []u8{len: 16384}
+		rx_offset: 0
+		rx_len:    0
 	}
 	nc.read_info()!
 	nc.send_connect()!
@@ -100,16 +103,39 @@ fn (mut nc Client) send_connect() ! {
 }
 
 fn (mut nc Client) read_line() !string {
-	mut out := []u8{}
-	mut one := []u8{len: 1}
+	mut line := []u8{}
 	for {
-		n := nc.conn.read(mut one)!
-		if n == 0 {
-			return error(err_connection_closed)
+		if nc.rx_offset >= nc.rx_len {
+			nc.rx_offset = 0
+			nc.rx_len = 0
+			n := nc.conn.read(mut nc.rx_buf)!
+			if n == 0 {
+				return error(err_connection_closed)
+			}
+			nc.rx_len = n
 		}
-		out << one[0]
-		if out.len >= 2 && out[out.len - 2] == `\r` && out[out.len - 1] == `\n` {
-			return out[..out.len - 2].bytestr()
+
+		mut found := -1
+		for i in nc.rx_offset .. nc.rx_len {
+			if nc.rx_buf[i] == `\n` {
+				found = i
+				break
+			}
+		}
+
+		if found != -1 {
+			mut end := found
+			if end > nc.rx_offset && nc.rx_buf[end - 1] == `\r` {
+				end--
+			} else if end == nc.rx_offset && line.len > 0 && line[line.len - 1] == `\r` {
+				line.delete_last()
+			}
+			line << nc.rx_buf[nc.rx_offset..end]
+			nc.rx_offset = found + 1
+			return line.bytestr()
+		} else {
+			line << nc.rx_buf[nc.rx_offset..nc.rx_len]
+			nc.rx_offset = nc.rx_len
 		}
 	}
 	return error(err_connection_closed)
@@ -118,6 +144,15 @@ fn (mut nc Client) read_line() !string {
 fn (mut nc Client) read_exact(size int) ![]u8 {
 	mut data := []u8{len: size}
 	mut read := 0
+
+	if nc.rx_offset < nc.rx_len {
+		available := nc.rx_len - nc.rx_offset
+		to_copy := if available < size { available } else { size }
+		copy(mut data[..to_copy], nc.rx_buf[nc.rx_offset .. nc.rx_offset + to_copy])
+		nc.rx_offset += to_copy
+		read += to_copy
+	}
+
 	for read < size {
 		n := nc.conn.read(mut data[read..])!
 		if n == 0 {
@@ -125,6 +160,7 @@ fn (mut nc Client) read_exact(size int) ![]u8 {
 		}
 		read += n
 	}
+
 	return data
 }
 

@@ -7,7 +7,7 @@ pub struct StreamConfig {
 pub mut:
 	name         string
 	subjects     []string
-	retention    string
+	retention    string = 'limits'
 	max_msgs     i64 = -1
 	max_bytes    i64 = -1
 	max_age      i64
