@@ -3,6 +3,10 @@ module nats
 import rand
 import time
 
+// request sends a message and waits for a response (request-reply pattern).
+// Automatically creates a unique reply inbox, publishes the request, and waits for response.
+// Returns error if no responder answers within the timeout or if no responder exists.
+// Common timeout values: 1*time.second for quick responses, 5*time.second for slower services.
 pub fn (mut nc Client) request(subject string, data []u8, timeout time.Duration) !Msg {
 	inbox := new_inbox()
 	sub := nc.subscribe(inbox)!
@@ -30,6 +34,8 @@ pub fn (mut nc Client) request(subject string, data []u8, timeout time.Duration)
 	return error(err_request_timeout)
 }
 
+// request_string sends a string request and waits for a response.
+// Convenience wrapper around request() that converts string to bytes.
 pub fn (mut nc Client) request_string(subject string, data string, timeout time.Duration) !Msg {
 	return nc.request(subject, data.bytes(), timeout)
 }

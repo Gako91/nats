@@ -6,17 +6,245 @@ The project focuses on simplicity, performance and idiomatic V APIs, while progr
 
 ## Status
 
-Early development. The current implementation provides a small synchronous client:
+Early development. The current implementation provides a synchronous client:
 
 - TCP connection to a `nats://` server with high-performance custom input buffering (reducing syscalls)
 - NATS protocol handshake (`INFO`, `CONNECT`, `PING`/`PONG`)
-- `publish`, `subscribe`, `unsubscribe`, `flush`
-- request/reply helper using an auto-generated `_INBOX.*`
+- `publish`, `subscribe`, `unsubscribe`, `flush`, `request`/`reply`
 - headers / `HMSG` parsing and no-responders handling
 - server `max_payload` checks before publish
+- queue groups for load-balanced message distribution
+- authentication (token and user/password)
+- TLS support
+- reconnect logic with configurable retries
+- connection callbacks (on_disconnect, on_reconnect, on_error)
 - basic JetStream context with stream create/update/info/delete and publish acknowledgements
 
-Not implemented yet: TLS, authentication, reconnect logic, async dispatch callbacks, consumer management, pull subscriptions and object/key-value helpers.
+Not implemented yet: async dispatch callbacks, consumer management, pull subscriptions, and object/key-value helpers.
+
+## Getting Started
+
+### Prerequisites
+
+- V installed ([download here](https://vlang.io))
+- NATS server running locally (default: `nats://localhost:4222`)
+  - Docker: `docker run -p 4222:4222 nats`
+  - Or use the provided `docker-compose.yml`: `docker-compose up`
+
+### Installation
+
+Add this to your project's `v.mod`:
+
+```
+Module {
+	name: 'my_app'
+	dependencies: ['github.com/vlang/nats']
+}
+```
+
+Or use locally:
+
+```v
+import ../path/to/nats as nats
+```
+
+### Your First Program
+
+```v
+import nats
+
+fn main() {
+	// Connect to NATS server (will panic if connection fails)
+	mut nc := nats.connect('nats://127.0.0.1:4222')!
+	defer { nc.close() }  // Always close when done
+
+	// Subscribe to a subject
+	nc.subscribe('hello')!
+	nc.flush()!
+
+	// Publish a message
+	nc.publish_string('hello', 'world')!
+
+	// Receive the message
+	msg := nc.next_msg()!
+	println('Received: ${msg.text()}')
+}
+```
+
+Run it:
+
+```sh
+v run your_program.v
+```
+
+## Concepts & Terminology
+
+### Subject
+
+A subject is the address where messages are sent. Think of it like a channel or topic.
+
+- `hello` - a simple subject
+- `orders.created` - hierarchical subject with dots
+- `users.>` - wildcard: matches all subjects starting with `users.`
+- `user.*` - wildcard: matches one level (e.g., `user.123`, `user.456`)
+
+### Publish & Subscribe
+
+- **Publish**: Send a message to a subject
+- **Subscribe**: Listen for messages on a subject
+- Multiple subscribers can listen to the same subject; they all receive the same message
+
+### Request-Reply
+
+A pattern where:
+
+1. A client sends a request message with an auto-generated reply inbox
+2. A service listens, receives the request, and publishes a response to the reply inbox
+3. The client receives the response
+
+- Useful for synchronous RPC-style communication
+
+### Queue Groups
+
+When multiple subscribers join the same queue group, each message is delivered to only ONE subscriber (load balanced).
+
+- `subscribe('subject')` - all subscribers get all messages
+- `queue_subscribe('subject', 'group_name')` - each message goes to one random subscriber in the group
+- Great for worker pools and distributing load
+
+### JetStream
+
+NATS's durability layer:
+
+- **Stream**: A persistent log of messages on a set of subjects
+- **Consumer**: A stateful subscription to a stream (can replay messages, acknowledge delivery)
+- Messages published to a stream are persisted and can be replayed or consumed in order
+- Used for event sourcing, audit trails, and guaranteed delivery
+
+## Common Patterns
+
+### Basic Pub/Sub
+
+See [examples/basic.v](examples/basic.v)
+
+- Multiple subscribers all receive the same message
+- Fire-and-forget: no guarantee message was processed
+
+### Request-Reply (RPC Style)
+
+See [examples/request_reply.v](examples/request_reply.v) and [examples/echo_service.v](examples/echo_service.v)
+
+- Synchronous request from client to service
+- Service responds with a result
+- Built-in timeout handling
+
+### Load Distribution with Queue Groups
+
+See [examples/queue_groups.v](examples/queue_groups.v)
+
+- Multiple workers listen on the same queue group
+- Each job goes to exactly one worker
+- Perfect for background jobs or worker pools
+
+### Persistent Events with JetStream
+
+See [examples/jetstream.v](examples/jetstream.v)
+
+- Messages are stored persistently
+- Can be replayed or consumed reliably
+- Useful for event sourcing or audit logging
+
+## Connection Options
+
+The `Options` struct lets you customize connection behavior:
+
+```v
+mut opts := nats.Options{
+	url: 'nats://user:pass@localhost:4222'
+	name: 'my_client'              // Client name (for identification)
+	auth_token: 'my_bearer_token'  // OR use token auth
+	user: 'username'               // OR use username/password
+	password: 'password'
+	connect_timeout: 5 * time.second  // How long to wait for connection
+	allow_reconnect: true          // Reconnect on disconnect
+	max_reconnects: 60             // Max reconnect attempts
+	reconnect_time_wait: 2 * time.second  // Wait between reconnects
+	on_disconnect: fn (mut nc nats.Client) {
+		println('Disconnected from NATS')
+	}
+	on_reconnect: fn (mut nc nats.Client) {
+		println('Reconnected to NATS')
+	}
+	on_error: fn (mut nc nats.Client, err string) {
+		println('Error: ${err}')
+	}
+}
+
+mut nc := nats.connect_with_options(opts)!
+```
+
+## Troubleshooting
+
+### "Connection refused"
+
+**Problem**: Can't connect to NATS server
+**Solution**: Make sure NATS is running:
+
+```sh
+# Using Docker
+docker run -p 4222:4222 nats
+
+# Or if installed locally
+nats-server
+```
+
+### "No responders" error
+
+**Problem**: `request()` returns an error saying no responders available
+**Solution**: Make sure the service is running and listening:
+
+```v
+// Service must be running BEFORE client makes request
+nc.subscribe('my.service')!
+nc.flush()!
+// Now client can safely call request()
+```
+
+### Request timeout
+
+**Problem**: `request()` takes too long or times out
+**Solution**: Increase the timeout value:
+
+```v
+// Default 2 second timeout might be too short
+reply := nc.request_string('slow.service', 'data', 10 * time.second)!
+```
+
+### Message not received
+
+**Problem**: Published messages aren't being received by subscriber
+**Solution**: Remember to call `flush()` after subscribing:
+
+```v
+sub := nc.subscribe('hello')!
+nc.flush()!  // IMPORTANT: Flush to register subscription
+nc.publish_string('hello', 'world')!
+```
+
+### Error handling with `!`
+
+V uses the `!` operator for error propagation:
+
+```v
+// This will panic if connection fails:
+mut nc := nats.connect('nats://localhost:4222')!
+
+// Or handle errors gracefully:
+mut nc := nats.connect('nats://localhost:4222') or {
+	eprintln('Failed to connect: ${err}')
+	return
+}
+```
 
 ## Project layout
 

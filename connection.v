@@ -5,6 +5,9 @@ import net
 import net.ssl
 import time
 
+// connect() establishes a connection to a NATS server at the given URL.
+// Simplest way to connect: `mut nc := connect('nats://localhost:4222')!`
+// For more control, use `connect_with_options()` with custom Options.
 pub fn connect(url string) !Client {
 	mut opts := Options{
 		url: url
@@ -12,17 +15,22 @@ pub fn connect(url string) !Client {
 	return connect_with_options(opts)
 }
 
+// connect_with_options establishes a connection with custom Options (auth, TLS, timeouts, etc.).
+// Always call close() on the returned Client when done to release resources.
 pub fn connect_with_options(opts Options) !Client {
 	mut nc := Client{
-		subs:         map[string]Subscription{}
-		rx_buf:       []u8{len: 16384}
-		rx_offset:    0
-		rx_len:       0
+		subs:      map[string]Subscription{}
+		rx_buf:    []u8{len: 16384}
+		rx_offset: 0
+		rx_len:    0
 	}
 	nc.connect_to(opts)!
 	return nc
 }
 
+// close  gracefully closes the connection to the NATS server.
+// Triggers the on_close callback if configured.
+// Always call this when done with the client to clean up resources.
 pub fn (mut nc Client) close() {
 	if nc.connected {
 		nc.connected = false
@@ -33,6 +41,9 @@ pub fn (mut nc Client) close() {
 	}
 }
 
+// flush waits for the server to acknowledge all pending messages.
+// Useful to ensure all published messages have been received by the server before proceeding.
+// Returns error if connection is lost.
 pub fn (mut nc Client) flush() ! {
 	nc.write('PING${crlf}')!
 
@@ -156,7 +167,7 @@ fn (mut nc Client) read_exact(size int) ![]u8 {
 	if nc.rx_offset < nc.rx_len {
 		available := nc.rx_len - nc.rx_offset
 		to_copy := if available < size { available } else { size }
-		copy(mut data[..to_copy], nc.rx_buf[nc.rx_offset .. nc.rx_offset + to_copy])
+		copy(mut data[..to_copy], nc.rx_buf[nc.rx_offset..nc.rx_offset + to_copy])
 		nc.rx_offset += to_copy
 		read += to_copy
 	}
@@ -224,7 +235,7 @@ fn (mut nc Client) connect_to(opts Options) ! {
 	conn.set_write_timeout(opts.connect_timeout)
 
 	nc.conn = conn
-	
+
 	// Reset the rx buffers for the new socket
 	nc.rx_offset = 0
 	nc.rx_len = 0
@@ -334,4 +345,3 @@ fn (mut nc Client) restore_subscriptions() ! {
 pub fn (mut nc Client) disconnect_for_testing() ! {
 	nc.conn.close()!
 }
-
