@@ -91,8 +91,8 @@ fn (mut nc Client) send_connect() ! {
 		verbose:       nc.opts.verbose
 		pedantic:      nc.opts.pedantic
 		name:          nc.opts.name
-		lang:          'v'
-		version:       '0.1.0'
+		lang:          client_lang
+		version:       client_version
 		protocol:      1
 		echo:          !nc.opts.no_echo
 		headers:       nc.opts.headers
