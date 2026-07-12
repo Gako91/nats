@@ -25,12 +25,12 @@
 
 ## Phase 3 — connection quality
 
-- [ ] auth token
-- [ ] username/password
-- [ ] TLS
-- [ ] reconnect
-- [ ] multiple server URLs
-- [ ] async callbacks
+- [x] auth token
+- [x] username/password
+- [x] TLS
+- [x] reconnect
+- [x] multiple server URLs
+- [x] async callbacks
 
 ## Phase 4 — JetStream core
 

@@ -91,3 +91,57 @@ fn test_integration_publish_subscribe() {
 	assert msg.subject == subject
 	assert msg.text() == 'hello integration'
 }
+
+struct CallbackCounter {
+mut:
+	disconnects int
+	reconnects  int
+}
+
+fn test_integration_reconnect() {
+	if !integration_enabled() {
+		eprintln('skipping integration test; set ${integration_env}=1 to enable')
+		return
+	}
+
+	mut counter := &CallbackCounter{}
+
+	mut nc := nats.connect_with_options(nats.Options{
+		url:                 integration_url()
+		allow_reconnect:     true
+		reconnect_time_wait: 10 * time.millisecond
+		max_reconnects:      5
+		on_disconnect:       fn [mut counter] (mut client nats.Client) {
+			counter.disconnects++
+		}
+		on_reconnect:        fn [mut counter] (mut client nats.Client) {
+			counter.reconnects++
+		}
+	})!
+	defer { nc.close() }
+
+	subject := 'v.integration.reconnect.${rand.ulid()}'
+	sub := nc.subscribe(subject)!
+	nc.flush()!
+
+	// Verify that the connection is active and we can publish/receive
+	nc.publish_string(subject, 'first message')!
+	msg := nc.next_msg()!
+	assert msg.text() == 'first message'
+
+	// Simulate unexpected connection loss by closing the socket
+	nc.disconnect_for_testing()!
+
+	// Publishing again should trigger reconnect automatically, restore subscriptions, and succeed
+	nc.publish_string(subject, 'second message')!
+
+	// Verify the reconnect callbacks were invoked
+	assert counter.disconnects == 1
+	assert counter.reconnects == 1
+
+	// Verify we can receive the message after reconnect
+	msg2 := nc.next_msg()!
+	assert msg2.text() == 'second message'
+	assert msg2.sid == sub.sid
+}
+

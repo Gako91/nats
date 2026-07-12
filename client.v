@@ -5,7 +5,7 @@ import net
 @[heap]
 pub struct Client {
 mut:
-	conn         &net.TcpConn = unsafe { nil }
+	conn         net.Connection = &net.TcpConn(unsafe { nil })
 	next_sid     int          = 1
 	subs         map[string]Subscription
 	pending_msgs []Msg

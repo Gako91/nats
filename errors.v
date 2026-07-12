@@ -20,9 +20,8 @@ fn address_from_url(raw string) !string {
 	}
 	if url.starts_with('nats://') {
 		url = url[7..]
-	}
-	if url.starts_with('tls://') {
-		return error('TLS is not implemented yet; use nats://')
+	} else if url.starts_with('tls://') {
+		url = url[6..]
 	}
 	if url.contains('@') {
 		url = url.all_after('@')
@@ -37,6 +36,33 @@ fn address_from_url(raw string) !string {
 	return url
 }
 
+fn hostname_from_url(raw string) !string {
+	addr := address_from_url(raw)!
+	if addr.contains(':') {
+		return addr.all_before(':')
+	}
+	return addr
+}
+
+fn parse_url_credentials(raw string) (string, string, string) {
+	mut url := raw
+	if !url.contains('@') {
+		return '', '', ''
+	}
+	if url.starts_with('nats://') {
+		url = url[7..]
+	} else if url.starts_with('tls://') {
+		url = url[6..]
+	}
+	creds := url.all_before('@')
+	if creds.contains(':') {
+		user := creds.all_before(':')
+		pass := creds.all_after(':')
+		return user, pass, ''
+	}
+	return '', '', creds
+}
+
 fn validate_subject(subject string) ! {
 	if subject == '' {
 		return error('subject must not be empty')
@@ -47,3 +73,4 @@ fn validate_subject(subject string) ! {
 	}
 	return
 }
+

@@ -8,9 +8,9 @@ pub fn (mut nc Client) request(subject string, data []u8, timeout time.Duration)
 	sub := nc.subscribe(inbox)!
 	nc.flush()!
 	nc.publish_with_reply(subject, inbox, data)!
-	nc.conn.set_read_timeout(timeout)
+	nc.set_read_timeout(timeout)
 	defer {
-		nc.conn.set_read_timeout(nc.opts.connect_timeout)
+		nc.set_read_timeout(nc.opts.connect_timeout)
 		nc.unsubscribe(sub) or {}
 	}
 	for {

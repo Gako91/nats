@@ -28,3 +28,33 @@ fn test_max_payload_error_before_socket_write() {
 	}
 	assert false
 }
+
+fn test_parse_url_credentials() {
+	u1, p1, t1 := parse_url_credentials('nats://user:pass@localhost:4222')
+	assert u1 == 'user'
+	assert p1 == 'pass'
+	assert t1 == ''
+
+	u2, p2, t2 := parse_url_credentials('nats://mytoken@localhost:4222')
+	assert u2 == ''
+	assert p2 == ''
+	assert t2 == 'mytoken'
+
+	u3, p3, t3 := parse_url_credentials('tls://user:pass@localhost:4222')
+	assert u3 == 'user'
+	assert p3 == 'pass'
+	assert t3 == ''
+
+	u4, p4, t4 := parse_url_credentials('nats://localhost:4222')
+	assert u4 == ''
+	assert p4 == ''
+	assert t4 == ''
+}
+
+fn test_hostname_and_address_from_url() {
+	assert address_from_url('nats://user:pass@localhost:4222')! == 'localhost:4222'
+	assert address_from_url('tls://localhost:4222')! == 'localhost:4222'
+	assert address_from_url('nats://localhost')! == 'localhost:4222'
+	assert hostname_from_url('nats://user:pass@myhost:4222')! == 'myhost'
+}
+

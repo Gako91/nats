@@ -15,6 +15,9 @@ struct ConnectPayload {
 	echo          bool
 	headers       bool
 	no_responders bool
+	auth_token    string @[json: auth_token; omitempty]
+	user          string @[json: user; omitempty]
+	pass          string @[json: pass; omitempty]
 }
 
 enum ProtocolOp {

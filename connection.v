@@ -2,6 +2,8 @@ module nats
 
 import json
 import net
+import net.ssl
+import time
 
 pub fn connect(url string) !Client {
 	mut opts := Options{
@@ -11,23 +13,13 @@ pub fn connect(url string) !Client {
 }
 
 pub fn connect_with_options(opts Options) !Client {
-	address := address_from_url(opts.url)!
-	mut conn := net.dial_tcp(address)!
-	conn.set_read_timeout(opts.connect_timeout)
-	conn.set_write_timeout(opts.connect_timeout)
-
 	mut nc := Client{
-		conn:      conn
-		opts:      opts
-		subs:      map[string]Subscription{}
-		rx_buf:    []u8{len: 16384}
-		rx_offset: 0
-		rx_len:    0
+		subs:         map[string]Subscription{}
+		rx_buf:       []u8{len: 16384}
+		rx_offset:    0
+		rx_len:       0
 	}
-	nc.read_info()!
-	nc.send_connect()!
-	nc.flush()!
-	nc.connected = true
+	nc.connect_to(opts)!
 	return nc
 }
 
@@ -35,6 +27,9 @@ pub fn (mut nc Client) close() {
 	if nc.connected {
 		nc.connected = false
 		nc.conn.close() or {}
+		if cb := nc.opts.on_close {
+			cb(mut nc)
+		}
 	}
 }
 
@@ -97,6 +92,9 @@ fn (mut nc Client) send_connect() ! {
 		echo:          !nc.opts.no_echo
 		headers:       nc.opts.headers
 		no_responders: nc.opts.headers && nc.opts.no_responders
+		auth_token:    nc.opts.auth_token
+		user:          nc.opts.user
+		pass:          nc.opts.password
 	}
 	nc.write('CONNECT ${json.encode(payload)}${crlf}')!
 	return
@@ -108,8 +106,18 @@ fn (mut nc Client) read_line() !string {
 		if nc.rx_offset >= nc.rx_len {
 			nc.rx_offset = 0
 			nc.rx_len = 0
-			n := nc.conn.read(mut nc.rx_buf)!
+			n := nc.conn.read(mut nc.rx_buf) or {
+				if nc.opts.allow_reconnect {
+					nc.reconnect()!
+					continue
+				}
+				return err
+			}
 			if n == 0 {
+				if nc.opts.allow_reconnect {
+					nc.reconnect()!
+					continue
+				}
 				return error(err_connection_closed)
 			}
 			nc.rx_len = n
@@ -154,8 +162,18 @@ fn (mut nc Client) read_exact(size int) ![]u8 {
 	}
 
 	for read < size {
-		n := nc.conn.read(mut data[read..])!
+		n := nc.conn.read(mut data[read..]) or {
+			if nc.opts.allow_reconnect {
+				nc.reconnect()!
+				return error(err_connection_closed)
+			}
+			return err
+		}
 		if n == 0 {
+			if nc.opts.allow_reconnect {
+				nc.reconnect()!
+				return error(err_connection_closed)
+			}
 			return error(err_connection_closed)
 		}
 		read += n
@@ -165,6 +183,155 @@ fn (mut nc Client) read_exact(size int) ![]u8 {
 }
 
 fn (mut nc Client) write(s string) ! {
-	nc.conn.write_string(s)!
-	return
+	nc.write_bytes(s.bytes())!
 }
+
+fn (mut nc Client) write_bytes(data []u8) ! {
+	nc.conn.write(data) or {
+		if nc.opts.allow_reconnect {
+			nc.reconnect()!
+			nc.conn.write(data)!
+			return
+		}
+		return err
+	}
+}
+
+// Timeout helper methods
+
+pub fn (mut nc Client) set_read_timeout(t time.Duration) {
+	if mut nc.conn is net.TcpConn {
+		nc.conn.set_read_timeout(t)
+	} else if mut nc.conn is ssl.SSLConn {
+		nc.conn.set_read_timeout(t)
+	}
+}
+
+pub fn (mut nc Client) set_write_timeout(t time.Duration) {
+	if mut nc.conn is net.TcpConn {
+		nc.conn.set_write_timeout(t)
+	}
+}
+
+// Internal connection helpers
+
+fn (mut nc Client) connect_to(opts Options) ! {
+	address := address_from_url(opts.url)!
+	hostname := hostname_from_url(opts.url)!
+
+	mut conn := net.dial_tcp(address)!
+	conn.set_read_timeout(opts.connect_timeout)
+	conn.set_write_timeout(opts.connect_timeout)
+
+	nc.conn = conn
+	
+	// Reset the rx buffers for the new socket
+	nc.rx_offset = 0
+	nc.rx_len = 0
+
+	// Parse credentials from URL if present and override options
+	mut final_opts := opts
+	url_user, url_pass, url_token := parse_url_credentials(opts.url)
+	if url_token != '' {
+		final_opts.auth_token = url_token
+	}
+	if url_user != '' {
+		final_opts.user = url_user
+		final_opts.password = url_pass
+	}
+	nc.opts = final_opts
+
+	nc.read_info()!
+
+	// Upgrade to TLS if required by the server or forced/requested by options
+	if nc.info.tls_required || opts.tls_config != none || opts.url.starts_with('tls://') {
+		nc.upgrade_to_tls(hostname)!
+	}
+
+	nc.send_connect()!
+	nc.flush()!
+	nc.connected = true
+}
+
+fn (mut nc Client) upgrade_to_tls(hostname string) ! {
+	mut ssl_config := ssl.SSLConnectConfig{}
+	if cfg := nc.opts.tls_config {
+		ssl_config = cfg
+	}
+
+	mut tcp_conn := nc.conn as &net.TcpConn
+	mut ssl_conn := ssl.new_ssl_conn(ssl_config)!
+	ssl_conn.connect(mut *tcp_conn, hostname)!
+	nc.conn = ssl_conn
+}
+
+pub fn (mut nc Client) reconnect() ! {
+	if !nc.opts.allow_reconnect {
+		return error(err_connection_closed)
+	}
+
+	nc.connected = false
+	if cb := nc.opts.on_disconnect {
+		cb(mut nc)
+	}
+
+	mut attempts := 0
+	mut delay := nc.opts.reconnect_time_wait
+
+	// Build the list of server URLs to try
+	mut urls := []string{}
+	if nc.opts.servers.len > 0 {
+		urls << nc.opts.servers
+	}
+	if nc.opts.url !in urls {
+		urls << nc.opts.url
+	}
+
+	for attempts < nc.opts.max_reconnects {
+		attempts++
+		for url in urls {
+			mut new_opts := nc.opts
+			new_opts.url = url
+
+			nc.connect_to(new_opts) or {
+				if cb := nc.opts.on_error {
+					cb(mut nc, 'reconnect attempt failed for ${url}: ${err}')
+				}
+				continue
+			}
+
+			// Connection succeeded! Restore subscriptions.
+			nc.restore_subscriptions() or {
+				nc.close()
+				if cb := nc.opts.on_error {
+					cb(mut nc, 'failed to restore subscriptions on ${url}: ${err}')
+				}
+				continue
+			}
+
+			if cb := nc.opts.on_reconnect {
+				cb(mut nc)
+			}
+			return
+		}
+		time.sleep(delay)
+	}
+
+	return error('nats: reconnect failed after ${attempts} attempts')
+}
+
+fn (mut nc Client) restore_subscriptions() ! {
+	for _, sub in nc.subs {
+		if sub.queue == '' {
+			nc.write('SUB ${sub.subject} ${sub.sid}${crlf}')!
+		} else {
+			nc.write('SUB ${sub.subject} ${sub.queue} ${sub.sid}${crlf}')!
+		}
+	}
+	nc.flush()!
+}
+
+pub fn (mut nc Client) disconnect_for_testing() ! {
+	nc.conn.close()!
+}
+
