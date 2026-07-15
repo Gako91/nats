@@ -1,7 +1,6 @@
 module nats
 
 import json
-import rand
 import time
 
 // PubAck is the acknowledgment returned when publishing to a JetStream stream.
@@ -77,9 +76,4 @@ pub fn (mut js JetStream) publish_async(subject string, data []u8, callback Publ
 // publish_string_async is a convenience wrapper around publish_async that converts string to bytes.
 pub fn (mut js JetStream) publish_string_async(subject string, data string, callback PublishAckCallback) ! {
 	return js.publish_async(subject, data.bytes(), callback)
-}
-
-// new_inbox creates a unique reply inbox for internal use (re-exported from request module).
-fn new_inbox() string {
-	return '_INBOX.${rand.ulid()}'
 }

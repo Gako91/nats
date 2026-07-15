@@ -8,7 +8,7 @@ import time
 struct PendingPublish {
 	inbox      string
 	subject    string
-	callback   PublishAckCallback
+	callback   ?PublishAckCallback
 	created_at time.Time // Time when the publish was sent
 	timeout_ms i64       // milliseconds until timeout
 }

@@ -123,20 +123,22 @@ fn (mut nc Client) handle_async_publish_ack(msg Msg) bool {
 	pending := nc.pending_publishes[msg.sid] or { return false }
 
 	// Invoke the callback with the decoded ACK
-	if decoded.error.code != 0 || decoded.error.err_code != 0 || decoded.error.description != '' {
-		// Error case
-		result := PublishResult{
-			ack:       PubAck{}
-			error_msg: 'JetStream publish error: ${decoded.error.description}'
+	if callback := pending.callback {
+		if decoded.error.code != 0 || decoded.error.err_code != 0 || decoded.error.description != '' {
+			// Error case
+			result := PublishResult{
+				ack:       PubAck{}
+				error_msg: 'JetStream publish error: ${decoded.error.description}'
+			}
+			callback(mut nc, pending.subject, result)
+		} else {
+			// Success case
+			result := PublishResult{
+				ack:       decoded
+				error_msg: ''
+			}
+			callback(mut nc, pending.subject, result)
 		}
-		pending.callback(mut nc, pending.subject, result)
-	} else {
-		// Success case
-		result := PublishResult{
-			ack:       decoded
-			error_msg: ''
-		}
-		pending.callback(mut nc, pending.subject, result)
 	}
 
 	// Remove from pending publishes
@@ -161,11 +163,13 @@ fn (mut nc Client) cleanup_expired_publishes() {
 
 	for sid in expired_sids {
 		if pending := nc.pending_publishes[sid] {
-			result := PublishResult{
-				ack:       PubAck{}
-				error_msg: 'JetStream publish timeout: no ACK received within ${pending.timeout_ms}ms'
+			if callback := pending.callback {
+				result := PublishResult{
+					ack:       PubAck{}
+					error_msg: 'JetStream publish timeout: no ACK received within ${pending.timeout_ms}ms'
+				}
+				callback(mut nc, pending.subject, result)
 			}
-			pending.callback(mut nc, pending.subject, result)
 		}
 		nc.pending_publishes.delete(sid)
 	}
