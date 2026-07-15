@@ -29,6 +29,7 @@ docker compose -f docker-compose.yml down
 ## Available Tests
 
 ### Core NATS
+
 - `test_integration_connect_flush` - Connection and flush
 - `test_integration_no_responders` - No responders error
 - `test_integration_request_timeout_without_no_responders` - Request timeout
@@ -36,6 +37,7 @@ docker compose -f docker-compose.yml down
 - `test_integration_reconnect` - Connection recovery
 
 ### JetStream
+
 - `test_integration_jetstream_async_publish` - Async publish with callback
 - `test_integration_jetstream_async_publish_multiple` - Multiple concurrent async publishes
 - `test_integration_jetstream_pull_consumer` - Pull consumer batch retrieval
