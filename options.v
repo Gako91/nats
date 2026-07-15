@@ -11,6 +11,10 @@ pub type ConnCallback = fn (mut Client)
 // Called with mutable access to the Client and an error message.
 pub type ErrorCallback = fn (mut Client, string)
 
+// PublishAckCallback is called when an async JetStream publish completes (success or error).
+// The result.ack is populated on success, result.error_msg is populated on error.
+pub type PublishAckCallback = fn (mut Client, string, PublishResult)
+
 // Options configures a NATS Client connection.
 // Use default values with `Options{}` for quick start, or customize fields as needed.
 pub struct Options {
@@ -48,6 +52,8 @@ pub mut:
 	max_reconnects int = 60
 	// reconnect_time_wait: time to wait between reconnect attempts (default: 2s)
 	reconnect_time_wait time.Duration = 2 * time.second
+	// publish_async_timeout: timeout for async JetStream publish ACK (default: 5s)
+	publish_async_timeout time.Duration = 5 * time.second
 	// Callbacks for connection state changes
 	// on_disconnect: called when connection is lost
 	on_disconnect ?ConnCallback
@@ -57,4 +63,10 @@ pub mut:
 	on_close ?ConnCallback
 	// on_error: called when an error occurs
 	on_error ?ErrorCallback
+	// on_publish_ack: called when an async JetStream publish receives acknowledgment (optional)
+	on_publish_ack ?PublishAckCallback
+	// on_publish_error: called when an async JetStream publish fails (optional)
+	// Note: Both success and error are handled via on_publish_ack (using result union)
+	// This field is kept for future expansion if needed
+	on_publish_error ?PublishAckCallback
 }

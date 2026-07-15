@@ -145,3 +145,204 @@ fn test_integration_reconnect() {
 	assert msg2.sid == sub.sid
 }
 
+fn test_integration_jetstream_async_publish() {
+	if !integration_enabled() {
+		eprintln('skipping integration test; set ${integration_env}=1 to enable')
+		return
+	}
+
+	mut nc := nats.connect(integration_url())!
+	defer { nc.close() }
+
+	mut js := nc.jetstream()
+
+	// Create a test stream
+	stream_name := 'test_async_${rand.ulid()}'
+	js.add_stream(nats.StreamConfig{
+		name:     stream_name
+		subjects: ['test.async.>${stream_name}']
+	}) or { return }
+
+	// Set up to capture callback results
+	mut callback_invoked := false
+	mut callback_ack := nats.PubAck{}
+	mut callback_error := ''
+
+	// Define the async publish callback
+	async_callback := fn [mut callback_invoked, mut callback_ack, mut callback_error] (mut c nats.Client, subject string, result nats.PublishResult) {
+		callback_invoked = true
+		if result.error_msg != '' {
+			callback_error = result.error_msg
+		} else {
+			callback_ack = result.ack
+		}
+	}
+
+	// Publish async
+	subject := 'test.async.${stream_name}'
+	js.publish_string_async(subject, 'test message', async_callback) or {
+		panic('failed to publish async: ${err}')
+	}
+
+	// Give the callback a moment to be invoked (it runs on the reader thread)
+	time.sleep(100 * time.millisecond)
+
+	// Check that the callback was invoked
+	assert callback_invoked == true, 'callback was not invoked'
+	assert callback_error == '', 'callback had an error: ${callback_error}'
+	assert callback_ack.stream == stream_name, 'ack stream name mismatch'
+	assert callback_ack.seq > 0, 'ack seq should be > 0'
+}
+
+fn test_integration_jetstream_async_publish_multiple() {
+	if !integration_enabled() {
+		eprintln('skipping integration test; set ${integration_env}=1 to enable')
+		return
+	}
+
+	mut nc := nats.connect(integration_url())!
+	defer { nc.close() }
+
+	mut js := nc.jetstream()
+
+	// Create a test stream
+	stream_name := 'test_async_multi_${rand.ulid()}'
+	js.add_stream(nats.StreamConfig{
+		name:     stream_name
+		subjects: ['test.multi.>${stream_name}']
+	}) or { return }
+
+	// Track all acks
+	mut acks := []nats.PubAck{}
+	mut errors := []string{}
+
+	// Create callback
+	async_callback := fn [mut acks, mut errors] (mut c nats.Client, subject string, result nats.PublishResult) {
+		if result.error_msg != '' {
+			errors << result.error_msg
+		} else {
+			acks << result.ack
+		}
+	}
+
+	// Publish multiple messages async
+	subject := 'test.multi.${stream_name}'
+	for i := 0; i < 5; i++ {
+		js.publish_string_async(subject, 'message ${i}', async_callback) or {
+			panic('failed to publish: ${err}')
+		}
+	}
+
+	// Wait for all acks to arrive
+	time.sleep(500 * time.millisecond)
+
+	// Verify all acks received
+	assert acks.len == 5, 'expected 5 acks, got ${acks.len}'
+	assert errors.len == 0, 'expected no errors, got ${errors.len}: ${errors}'
+
+	// Verify sequences are in order
+	for i in 1 .. acks.len {
+		assert acks[i].seq > acks[i - 1].seq, 'sequences not in order'
+	}
+}
+
+fn test_integration_jetstream_pull_consumer() {
+	if !integration_enabled() {
+		eprintln('skipping integration test; set ${integration_env}=1 to enable')
+		return
+	}
+
+	mut nc := nats.connect(integration_url())!
+	defer { nc.close() }
+
+	mut js := nc.jetstream()
+
+	// Create a test stream
+	stream_name := 'test_pull_${rand.ulid()}'
+	js.add_stream(nats.StreamConfig{
+		name:     stream_name
+		subjects: ['test.pull.>${stream_name}']
+	}) or { return }
+
+	// Publish some test messages
+	subject := 'test.pull.${stream_name}'
+	for i := 0; i < 5; i++ {
+		js.publish_string(subject, 'message ${i}') or {}
+	}
+
+	// Create a pull consumer
+	consumer_info := js.pull_consumer_create(stream_name, nats.PullConsumerOptions{
+		filter_subject: subject
+	}) or { panic('failed to create pull consumer: ${err}') }
+
+	// Fetch messages using pull
+	messages, errors := js.fetch(stream_name, consumer_info.name, nats.PullFetchOptions{
+		batch:           5
+		idle_timeout_ms: 2000
+	}) or { panic('fetch failed: ${err}') }
+
+	// Verify we got the messages
+	assert messages.len == 5, 'expected 5 messages, got ${messages.len}'
+	assert errors.len == 0, 'expected no errors, got ${errors.len}'
+
+	// Verify message content
+	for i := 0; i < 5; i++ {
+		msg := messages[i]
+		expected := 'message ${i}'
+		actual := msg.text()
+		assert actual == expected, 'expected "${expected}", got "${actual}"'
+	}
+}
+
+fn test_integration_jetstream_ordered_consumer() {
+	if !integration_enabled() {
+		eprintln('skipping integration test; set ${integration_env}=1 to enable')
+		return
+	}
+
+	mut nc := nats.connect(integration_url())!
+	defer { nc.close() }
+
+	mut js := nc.jetstream()
+
+	// Create a test stream
+	stream_name := 'test_ordered_${rand.ulid()}'
+	js.add_stream(nats.StreamConfig{
+		name:     stream_name
+		subjects: ['test.ordered.>${stream_name}']
+	}) or { return }
+
+	// Publish messages in a specific order
+	subject := 'test.ordered.${stream_name}'
+	for i := 0; i < 3; i++ {
+		js.publish_string(subject, 'ordered_${i}') or {}
+	}
+
+	// Create an ordered consumer
+	consumer_info := js.ordered_consumer_create(stream_name, nats.OrderedConsumerOptions{
+		deliver_policy: .all
+	}) or { panic('failed to create ordered consumer: ${err}') }
+
+	// Subscribe to the ordered consumer's delivery subject
+	sub := js.subscribe_to_ordered_consumer(consumer_info.config.deliver_subject) or {
+		panic('failed to subscribe: ${err}')
+	}
+	defer { nc.unsubscribe(sub) or {} }
+
+	// Receive messages in order
+	mut received_messages := []string{}
+	for i := 0; i < 3; i++ {
+		msg := nc.next_msg() or { break }
+		received_messages << msg.text()
+		// Acknowledge the message
+		msg.ack(mut nc) or {}
+	}
+
+	// Verify we got all messages in order
+	assert received_messages.len == 3, 'expected 3 messages, got ${received_messages.len}'
+	for i in 0 .. received_messages.len {
+		expected := 'ordered_${i}'
+		actual := received_messages[i]
+		assert actual == expected, 'expected "${expected}", got "${actual}" at index ${i}'
+	}
+}

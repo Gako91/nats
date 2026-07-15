@@ -47,7 +47,7 @@ fn worker(name string) {
 	// queue_subscribe() creates a queue group subscription
 	// All subscribers in 'job_workers' group receive different messages (load balanced)
 	// Compare this with subscribe() where all subscribers get all messages
-	_sub := nc.queue_subscribe('jobs.process', 'job_workers')!
+	_ := nc.queue_subscribe('jobs.process', 'job_workers')!
 	nc.flush()!
 	println('[${name}] ready, listening on jobs.process in queue "job_workers"')
 

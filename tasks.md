@@ -1,5 +1,34 @@
 # Roadmap
 
+## Latest Updates (2026-07-15)
+
+### Recently Implemented ✅
+
+1. **Async Publish** — `publish_async()` with non-blocking ACK handling
+   - Configurable timeout via `Options.publish_async_timeout` (default: 5s)
+   - Automatic callback invocation when ACKs arrive
+   - Cleanup of expired pending publishes
+   - Full integration tests and examples
+
+2. **Pull Consumers** — Batch message retrieval pattern
+   - `pull_consumer_create()` for ephemeral/durable pull consumers
+   - `fetch()` method with configurable batch sizes and timeouts
+   - Flexible pull request customization (max_bytes, idle_heartbeat)
+
+3. **Ordered Consumers** — Strict ordering guarantee
+   - `ordered_consumer_create()` for guaranteed message ordering
+   - No duplicates, no gaps, strict sequence delivery
+   - Flow control with idle heartbeats
+   - `subscribe_to_ordered_consumer()` integration
+
+### Examples & Tests
+
+- `examples/async_publish.v` — Async publish with callbacks
+- `examples/pull_ordered_consumers.v` — Pull and ordered consumer usage
+- Integration tests for all new features (async, pull, ordered)
+
+---
+
 ## Phase 1 — MVP NATS core
 
 - [x] connect
@@ -36,12 +65,12 @@
 
 - [x] stream management — partial: create/update/info/delete are implemented
 - [x] sync publish — partial: publish with PubAck is implemented
-- [ ] async publish
-- [ ] consumer management
-- [ ] durable consumers
-- [ ] ack/nak
-- [ ] pull consumers
-- [ ] ordered consumers
+- [x] async publish — ✅ NEW: publish_async() with configurable timeouts + callbacks
+- [x] consumer management
+- [x] durable consumers
+- [x] ack/nak
+- [x] pull consumers — ✅ NEW: pull_consumer_create() + fetch() batch retrieval
+- [x] ordered consumers — ✅ NEW: ordered_consumer_create() + strict ordering guarantee
 
 ## Phase 5 — JetStream advanced
 

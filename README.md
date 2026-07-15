@@ -19,8 +19,12 @@ Early development. The current implementation provides a synchronous client:
 - reconnect logic with configurable retries
 - connection callbacks (on_disconnect, on_reconnect, on_error)
 - basic JetStream context with stream create/update/info/delete and publish acknowledgements
+- async publish with non-blocking callbacks
+- consumer management (durable, pull, ordered)
+- pull subscriptions with batch retrieval
+- ordered consumers with delivery guarantee
 
-Not implemented yet: async dispatch callbacks, consumer management, pull subscriptions, and object/key-value helpers.
+Not implemented yet: object/key-value helpers, Atlas Stream Processing.
 
 ## Getting Started
 
@@ -339,6 +343,56 @@ js.add_stream(nats.StreamConfig{
 
 ack := js.publish_string('events.created', '{"id":1}')!
 println('stored in ${ack.stream} at sequence ${ack.seq}')
+```
+
+### Async Publish
+
+See `examples/async_publish.v`:
+
+```v
+mut js := nc.jetstream()
+
+async_callback := fn [mut received] (mut c nats.Client, subject string, result nats.PublishResult) {
+	if result.error_msg != '' {
+		eprintln('publish error: ${result.error_msg}')
+	} else {
+		println('ack: seq=${result.ack.seq}, stream=${result.ack.stream}')
+		received++
+	}
+}
+
+js.publish_string_async('events.user.created', 'user data', async_callback)!
+```
+
+### Pull Consumers
+
+See `examples/pull_ordered_consumers.v`:
+
+```v
+consumer_info := js.pull_consumer_create('EVENTS', nats.PullConsumerOptions{
+	durable_name: 'my_consumer'
+	filter_subject: 'events.user.>'
+})!
+
+messages, errors := js.fetch('EVENTS', consumer_info.name, nats.PullFetchOptions{
+	batch: 10
+	idle_timeout_ms: 5000
+})!
+```
+
+### Ordered Consumers
+
+See `examples/pull_ordered_consumers.v`:
+
+```v
+consumer_info := js.ordered_consumer_create('EVENTS', nats.OrderedConsumerOptions{
+	deliver_policy: .all
+	filter_subject: 'events.>'
+})!
+
+sub := js.subscribe_to_ordered_consumer(consumer_info.config.deliver_subject)!
+msg := nc.next_msg()!
+msg.ack(mut nc)!
 ```
 
 ## Development
