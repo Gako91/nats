@@ -5,7 +5,7 @@ import net
 import net.ssl
 import time
 
-// connect() establishes a connection to a NATS server at the given URL.
+// connect establishes a connection to a NATS server at the given URL.
 // Simplest way to connect: `mut nc := connect('nats://localhost:4222')!`
 // For more control, use `connect_with_options()` with custom Options.
 pub fn connect(url string) !Client {
@@ -19,10 +19,11 @@ pub fn connect(url string) !Client {
 // Always call close() on the returned Client when done to release resources.
 pub fn connect_with_options(opts Options) !Client {
 	mut nc := Client{
-		subs:      map[string]Subscription{}
-		rx_buf:    []u8{len: 16384}
-		rx_offset: 0
-		rx_len:    0
+		subs:              map[string]Subscription{}
+		pending_publishes: map[string]PendingPublish{}
+		rx_buf:            []u8{len: 16384}
+		rx_offset:         0
+		rx_len:            0
 	}
 	nc.connect_to(opts)!
 	return nc
