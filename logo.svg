@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" width="100%" height="100%">
+  <defs>
+    <!-- Dégradé pour le flux de données ultra-rapide (JetStream/Vlang) -->
+    <linearGradient id="pipeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00E5FF" stop-opacity="0.2" />
+      <stop offset="50%" stop-color="#00A3FF" />
+      <stop offset="100%" stop-color="#00E5FF" />
+    </linearGradient>
+
+    <!-- Lueur (Glow) pour l'effet d'impulsion lumineuse -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+  </defs>
+
+  <!-- Fond optionnel (Le rendu est transparent, idéal pour GitHub) -->
+  <rect width="100%" height="100%" fill="none"/>
+
+  <g transform="translate(100, 150)">
+    <!-- Le Tuyau / Conduit Réseau en V (Arrière-plan fixe) -->
+    <path d="M 50,0 L 300,450 L 550,0"
+          fill="none"
+          stroke="#1E293B"
+          stroke-width="90"
+          stroke-linecap="square"
+          stroke-linejoin="miter" />
+
+    <!-- Le Flux de données à haute vitesse (Lumière interne) -->
+    <path d="M 50,0 L 300,450 L 550,0"
+          fill="none"
+          stroke="url(#pipeGradient)"
+          stroke-width="50"
+          stroke-linecap="square"
+          stroke-linejoin="miter"
+          filter="url(#glow)" />
+
+    <!-- Point d'impulsion/paquet réseau qui "sort" du pipe -->
+    <circle cx="550" cy="0" r="25" fill="#00E5FF" filter="url(#glow)" />
+  </g>
+</svg>
