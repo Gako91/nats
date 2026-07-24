@@ -15,7 +15,7 @@ fn main() {
 	stream_name := 'async_example'
 	js.add_stream(nats.StreamConfig{
 		name:     stream_name
-		subjects: ['events.>']
+		subjects: ['async_events.>']
 	}) or {
 		// Stream might already exist, that's OK
 		println('Stream creation info: ${err}')
@@ -42,7 +42,7 @@ fn main() {
 	// Publish several messages asynchronously
 	println('Publishing 5 messages asynchronously...')
 	for i in 1 .. 6 {
-		subject := 'events.order.created'
+		subject := 'async_events.order.created'
 		message := 'Order #${i} created'
 
 		// Publish async - returns immediately, callback will be called when ACK arrives

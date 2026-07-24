@@ -11,10 +11,11 @@ fn main() {
 
 	// Create a test stream
 	stream_name := 'orders'
+	js.delete_stream(stream_name) or {}
 	js.add_stream(nats.StreamConfig{
 		name:     stream_name
 		subjects: ['orders.>']
-	}) or { println('Stream already exists or error: ${err}') }
+	}) or { println('Stream creation info: ${err}') }
 
 	println('=== Pull Consumer Example ===')
 	example_pull_consumer(mut nc, mut js, stream_name)

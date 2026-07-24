@@ -21,7 +21,10 @@ fn main() {
 	js.add_stream(nats.StreamConfig{
 		name:     'EVENTS'
 		subjects: ['events.>']
-	})!
+	}) or {
+		// Stream might already exist or overlap, that's OK
+		println('Stream creation info: ${err}')
+	}
 
 	// Publish a message to the stream with acknowledgment
 	// Unlike regular publish(), this waits for the server to confirm message is stored

@@ -44,41 +44,41 @@ pub enum ReplayPolicy {
 pub struct ConsumerConfig {
 pub mut:
 	// durable_name: persistent name for durable consumers. Empty = ephemeral.
-	durable_name string @[json: 'durable_name']
+	durable_name string @[json: 'durable_name'; omitempty]
 	// description: optional human-readable description
-	description string
+	description string @[json: 'description'; omitempty]
 	// deliver_policy: where to start delivering messages from (default: all)
 	deliver_policy DeliverPolicy @[json: 'deliver_policy']
 	// deliver_start_sequence: starting sequence when deliver_policy = by_start_sequence
-	deliver_start_sequence u64 @[json: 'opt_start_seq']
+	deliver_start_sequence u64 @[json: 'opt_start_seq'; omitempty]
 	// deliver_start_time: RFC 3339 timestamp when deliver_policy = by_start_time
-	deliver_start_time string @[json: 'opt_start_time']
+	deliver_start_time string @[json: 'opt_start_time'; omitempty]
 	// ack_policy: how messages should be acknowledged (default: explicit)
 	ack_policy AckPolicy @[json: 'ack_policy']
 	// ack_wait: nanoseconds before an unacknowledged message is redelivered (default: 30s)
-	ack_wait i64 @[json: 'ack_wait']
+	ack_wait i64 @[json: 'ack_wait'; omitempty]
 	// max_deliver: maximum number of delivery attempts (-1 = unlimited)
-	max_deliver int @[json: 'max_deliver']
+	max_deliver int @[json: 'max_deliver'; omitempty]
 	// filter_subject: optional subject filter, must be a subset of the stream's subjects
-	filter_subject string @[json: 'filter_subject']
+	filter_subject string @[json: 'filter_subject'; omitempty]
 	// replay_policy: instant or original speed replay (default: instant)
 	replay_policy ReplayPolicy @[json: 'replay_policy']
 	// max_waiting: maximum number of pending pull requests (pull consumers only)
-	max_waiting int @[json: 'max_waiting']
+	max_waiting int @[json: 'max_waiting'; omitempty]
 	// max_ack_pending: maximum number of unacknowledged messages in flight
-	max_ack_pending int @[json: 'max_ack_pending']
+	max_ack_pending int @[json: 'max_ack_pending'; omitempty]
 	// flow_control: enable flow control for push consumers
-	flow_control bool @[json: 'flow_control']
+	flow_control bool @[json: 'flow_control'; omitempty]
 	// idle_heartbeat: nanoseconds between heartbeats for push consumers (0 = disabled)
-	idle_heartbeat i64 @[json: 'idle_heartbeat']
+	idle_heartbeat i64 @[json: 'idle_heartbeat'; omitempty]
 	// deliver_subject: push subject for push-based consumers (empty = pull consumer)
-	deliver_subject string @[json: 'deliver_subject']
+	deliver_subject string @[json: 'deliver_subject'; omitempty]
 	// deliver_group: queue group name for push consumers with load balancing
-	deliver_group string @[json: 'deliver_group']
+	deliver_group string @[json: 'deliver_group'; omitempty]
 	// headers_only: deliver only message headers, no body
-	headers_only bool @[json: 'headers_only']
+	headers_only bool @[json: 'headers_only'; omitempty]
 	// mem_storage: store consumer state in memory instead of file
-	mem_storage bool @[json: 'mem_storage']
+	mem_storage bool @[json: 'mem_storage'; omitempty]
 }
 
 // SequenceInfo holds paired stream and consumer sequence numbers.
@@ -115,6 +115,12 @@ pub:
 	num_ack_pending int @[json: 'num_ack_pending']
 }
 
+struct CreateConsumerRequest {
+pub mut:
+	stream_name string         @[json: 'stream_name']
+	config      ConsumerConfig @[json: 'config']
+}
+
 // add_consumer creates a new consumer on the given stream.
 // For durable consumers, set cfg.durable_name. For ephemeral, leave it empty.
 // Returns the ConsumerInfo with the server-assigned name and initial state.
@@ -127,7 +133,11 @@ pub fn (mut js JetStream) add_consumer(stream_name string, cfg ConsumerConfig) !
 	} else {
 		'${js.prefix}.CONSUMER.CREATE.${stream_name}'
 	}
-	msg := js.api_request(subject, json2.encode[ConsumerConfig](cfg).bytes(), 5 * time.second)!
+	req := CreateConsumerRequest{
+		stream_name: stream_name
+		config:      cfg
+	}
+	msg := js.api_request(subject, json2.encode[CreateConsumerRequest](req).bytes(), 5 * time.second)!
 	return json2.decode[ConsumerInfo](msg.text())!
 }
 
@@ -141,8 +151,12 @@ pub fn (mut js JetStream) update_consumer(stream_name string, cfg ConsumerConfig
 	if cfg.durable_name == '' {
 		return error('consumer durable_name must not be empty for update')
 	}
+	req := CreateConsumerRequest{
+		stream_name: stream_name
+		config:      cfg
+	}
 	msg := js.api_request('${js.prefix}.CONSUMER.DURABLE.CREATE.${stream_name}.${cfg.durable_name}',
-		json2.encode[ConsumerConfig](cfg).bytes(), 5 * time.second)!
+		json2.encode[CreateConsumerRequest](req).bytes(), 5 * time.second)!
 	return json2.decode[ConsumerInfo](msg.text())!
 }
 
@@ -255,6 +269,7 @@ pub fn (mut js JetStream) fetch(stream_name string, consumer_name string, opts P
 	// Subscribe to receive the messages
 	inbox := new_inbox()
 	sub := js.nc.subscribe(inbox)!
+	js.nc.flush()!
 	defer { js.nc.unsubscribe(sub) or {} }
 
 	// Send the pull request with reply subject
@@ -288,6 +303,15 @@ pub fn (mut js JetStream) fetch(stream_name string, consumer_name string, opts P
 			}
 			errors << IError(error(err.msg()))
 			continue
+		}
+
+		if msg.status == 100 {
+			// Idle heartbeat - continue waiting
+			continue
+		}
+		if msg.status == 408 || msg.status == 409 {
+			// 408 Request Timeout / 409 Batch Complete
+			break
 		}
 
 		messages << msg
