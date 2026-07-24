@@ -1,6 +1,6 @@
 module nats
 
-import json
+import json2
 import time
 
 // subscribe creates a subscription to a subject.
@@ -114,7 +114,7 @@ fn (mut nc Client) handle_async_publish_ack(msg Msg) bool {
 	}
 
 	// Try to decode as PubAck JSON
-	decoded := json.decode(PubAck, msg.text()) or {
+	decoded := json2.decode[PubAck](msg.text()) or {
 		// Not a valid PubAck JSON, probably a regular message, don't handle
 		return false
 	}

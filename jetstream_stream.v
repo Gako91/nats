@@ -1,6 +1,6 @@
 module nats
 
-import json
+import json2
 import time
 
 // StreamConfig describes the configuration for a NATS JetStream stream.
@@ -60,9 +60,9 @@ pub fn (mut js JetStream) add_stream(cfg StreamConfig) !StreamInfo {
 	if cfg.name == '' {
 		return error('stream name must not be empty')
 	}
-	msg := js.api_request('${js.prefix}.STREAM.CREATE.${cfg.name}', json.encode(cfg).bytes(),
+	msg := js.api_request('${js.prefix}.STREAM.CREATE.${cfg.name}', json2.encode[StreamConfig](cfg).bytes(),
 		5 * time.second)!
-	info := json.decode(StreamInfo, msg.text())!
+	info := json2.decode[StreamInfo](msg.text())!
 	return info
 }
 
@@ -73,9 +73,9 @@ pub fn (mut js JetStream) update_stream(cfg StreamConfig) !StreamInfo {
 	if cfg.name == '' {
 		return error('stream name must not be empty')
 	}
-	msg := js.api_request('${js.prefix}.STREAM.UPDATE.${cfg.name}', json.encode(cfg).bytes(),
+	msg := js.api_request('${js.prefix}.STREAM.UPDATE.${cfg.name}', json2.encode[StreamConfig](cfg).bytes(),
 		5 * time.second)!
-	return json.decode(StreamInfo, msg.text())!
+	return json2.decode[StreamInfo](msg.text())!
 }
 
 // stream_info retrieves information about a stream: configuration and current statistics.
@@ -85,7 +85,7 @@ pub fn (mut js JetStream) stream_info(name string) !StreamInfo {
 		return error('stream name must not be empty')
 	}
 	msg := js.api_request('${js.prefix}.STREAM.INFO.${name}', []u8{}, 5 * time.second)!
-	return json.decode(StreamInfo, msg.text())!
+	return json2.decode[StreamInfo](msg.text())!
 }
 
 // delete_stream permanently deletes a stream and all its stored messages.
@@ -96,6 +96,6 @@ pub fn (mut js JetStream) delete_stream(name string) !bool {
 		return error('stream name must not be empty')
 	}
 	msg := js.api_request('${js.prefix}.STREAM.DELETE.${name}', []u8{}, 5 * time.second)!
-	resp := json.decode(map[string]bool, msg.text())!
+	resp := json2.decode[map[string]bool](msg.text())!
 	return resp['success'] or { false }
 }

@@ -1,6 +1,6 @@
 module nats
 
-import json
+import json2
 import rand
 import time
 
@@ -127,8 +127,8 @@ pub fn (mut js JetStream) add_consumer(stream_name string, cfg ConsumerConfig) !
 	} else {
 		'${js.prefix}.CONSUMER.CREATE.${stream_name}'
 	}
-	msg := js.api_request(subject, json.encode(cfg).bytes(), 5 * time.second)!
-	return json.decode(ConsumerInfo, msg.text())!
+	msg := js.api_request(subject, json2.encode[ConsumerConfig](cfg).bytes(), 5 * time.second)!
+	return json2.decode[ConsumerInfo](msg.text())!
 }
 
 // update_consumer updates an existing durable consumer's configuration.
@@ -142,8 +142,8 @@ pub fn (mut js JetStream) update_consumer(stream_name string, cfg ConsumerConfig
 		return error('consumer durable_name must not be empty for update')
 	}
 	msg := js.api_request('${js.prefix}.CONSUMER.DURABLE.CREATE.${stream_name}.${cfg.durable_name}',
-		json.encode(cfg).bytes(), 5 * time.second)!
-	return json.decode(ConsumerInfo, msg.text())!
+		json2.encode[ConsumerConfig](cfg).bytes(), 5 * time.second)!
+	return json2.decode[ConsumerInfo](msg.text())!
 }
 
 // consumer_info retrieves the current state and configuration of a consumer.
@@ -157,7 +157,7 @@ pub fn (mut js JetStream) consumer_info(stream_name string, consumer_name string
 	}
 	msg := js.api_request('${js.prefix}.CONSUMER.INFO.${stream_name}.${consumer_name}', []u8{},
 		5 * time.second)!
-	return json.decode(ConsumerInfo, msg.text())!
+	return json2.decode[ConsumerInfo](msg.text())!
 }
 
 // delete_consumer permanently removes a consumer from a stream.
@@ -172,7 +172,7 @@ pub fn (mut js JetStream) delete_consumer(stream_name string, consumer_name stri
 	}
 	msg := js.api_request('${js.prefix}.CONSUMER.DELETE.${stream_name}.${consumer_name}', []u8{},
 		5 * time.second)!
-	resp := json.decode(map[string]bool, msg.text())!
+	resp := json2.decode[map[string]bool](msg.text())!
 	return resp['success'] or { false }
 }
 

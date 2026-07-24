@@ -44,7 +44,7 @@ Add this to your project's `v.mod`:
 ```
 Module {
 	name: 'my_app'
-	dependencies: ['github.com/vlang/nats']
+	dependencies: ['https://github.com/Gako91/nats.git']
 }
 ```
 

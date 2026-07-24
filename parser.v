@@ -1,6 +1,6 @@
 module nats
 
-import json
+import json2
 
 struct ParsedHeaderBlock {
 	headers     map[string]string
@@ -9,7 +9,7 @@ struct ParsedHeaderBlock {
 }
 
 fn (mut nc Client) parse_info(payload string) ! {
-	nc.info = json.decode(ServerInfo, payload)!
+	nc.info = json2.decode[ServerInfo](payload)!
 	return
 }
 

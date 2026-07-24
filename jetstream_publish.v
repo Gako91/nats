@@ -1,6 +1,6 @@
 module nats
 
-import json
+import json2
 import time
 
 // PubAck is the acknowledgment returned when publishing to a JetStream stream.
@@ -29,7 +29,7 @@ pub:
 // Returns a PubAck with the stream name and sequence number, or error if publish fails.
 pub fn (mut js JetStream) publish(subject string, data []u8) !PubAck {
 	ack_msg := js.nc.request(subject, data, 5 * time.second)!
-	ack := json.decode(PubAck, ack_msg.text())!
+	ack := json2.decode[PubAck](ack_msg.text())!
 	if ack.error.code != 0 || ack.error.err_code != 0 || ack.error.description != '' {
 		return error('JetStream publish failed: ${ack.error.description}')
 	}

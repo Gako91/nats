@@ -1,6 +1,6 @@
 module nats
 
-import json
+import json2
 import net
 import net.ssl
 import time
@@ -108,7 +108,7 @@ fn (mut nc Client) send_connect() ! {
 		user:          nc.opts.user
 		pass:          nc.opts.password
 	}
-	nc.write('CONNECT ${json.encode(payload)}${crlf}')!
+	nc.write('CONNECT ${json2.encode[ConnectPayload](payload)}${crlf}')!
 	return
 }
 
