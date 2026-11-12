@@ -96,6 +96,6 @@ pub fn (mut js JetStream) delete_stream(name string) !bool {
 		return error('stream name must not be empty')
 	}
 	msg := js.api_request('${js.prefix}.STREAM.DELETE.${name}', []u8{}, 5 * time.second)!
-	resp := json2.decode[map[string]bool](msg.text())!
-	return resp['success'] or { false }
+	resp := json2.decode[ApiSuccessResponse](msg.text())!
+	return resp.success
 }

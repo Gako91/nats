@@ -186,8 +186,8 @@ pub fn (mut js JetStream) delete_consumer(stream_name string, consumer_name stri
 	}
 	msg := js.api_request('${js.prefix}.CONSUMER.DELETE.${stream_name}.${consumer_name}', []u8{},
 		5 * time.second)!
-	resp := json2.decode[map[string]bool](msg.text())!
-	return resp['success'] or { false }
+	resp := json2.decode[ApiSuccessResponse](msg.text())!
+	return resp.success
 }
 
 // ===== Pull Consumer Support =====
@@ -243,10 +243,10 @@ pub:
 // Returns array of messages and any errors.
 pub fn (mut js JetStream) fetch(stream_name string, consumer_name string, opts PullFetchOptions) !([]Msg, []IError) {
 	if stream_name == '' {
-		return error('stream name must not be empty'), []IError{}
+		return error('stream name must not be empty')
 	}
 	if consumer_name == '' {
-		return error('consumer name must not be empty'), []IError{}
+		return error('consumer name must not be empty')
 	}
 
 	// Construct the PULL request subject
@@ -365,10 +365,10 @@ pub fn (mut js JetStream) ordered_consumer_create(stream_name string, opts Order
 		max_ack_pending: opts.max_ack_pending
 		filter_subject:  opts.filter_subject
 		// Enable flow control with idle heartbeats
-		flow_control:   true
-		idle_heartbeat: opts.flow_control_ms * 1_000_000 // Convert to nanoseconds
+		flow_control:    true
+		idle_heartbeat:  opts.flow_control_ms * 1_000_000 // Convert to nanoseconds
 		// These headers are set by NATS but important for ordering
-		headers_only: false
+		headers_only:    false
 	}
 
 	return js.add_consumer(stream_name, cfg)
