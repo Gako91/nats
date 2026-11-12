@@ -3,6 +3,12 @@ module main
 import nats
 import time
 
+struct AckStats {
+mut:
+	completed int
+	failed    int
+}
+
 fn main() {
 	// Connect to NATS server
 	mut nc := nats.connect('nats://127.0.0.1:4222')!
@@ -21,17 +27,17 @@ fn main() {
 		println('Stream creation info: ${err}')
 	}
 
-	// Track async publishes
-	mut completed := 0
-	mut failed := 0
+	// Track async publishes. Closures capture copies of variables, so the
+	// counters live in a heap struct shared with the callback.
+	mut stats := &AckStats{}
 
 	// Define a callback for when ACKs arrive
-	ack_callback := fn [mut completed, mut failed] (mut c nats.Client, subject string, result nats.PublishResult) {
+	ack_callback := fn [mut stats] (mut c nats.Client, subject string, result nats.PublishResult) {
 		if result.error_msg != '' {
-			failed++
+			stats.failed++
 			println('[ERROR] Publish to ${subject} failed: ${result.error_msg}')
 		} else {
-			completed++
+			stats.completed++
 			println('[ACK] Message published to ${subject}')
 			println('  - Stream: ${result.ack.stream}')
 			println('  - Sequence: ${result.ack.seq}')
@@ -51,15 +57,16 @@ fn main() {
 		}
 	}
 
-	// Main thread can do other work while waiting for ACKs...
+	// The client has no background reader: ACK callbacks run when the
+	// connection is read (next_msg(), flush() or publish_async_complete()).
 	println('Waiting for ACKs...')
-	time.sleep(1 * time.second)
+	js.publish_async_complete(5 * time.second) or { println('Not all ACKs received: ${err}') }
 
 	// Print summary
 	println('')
 	println('=== Summary ===')
-	println('Completed: ${completed}')
-	println('Failed: ${failed}')
+	println('Completed: ${stats.completed}')
+	println('Failed: ${stats.failed}')
 
 	// Compare with sync publish for contrast
 	println('')

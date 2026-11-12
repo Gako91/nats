@@ -45,6 +45,7 @@ fn mock_client(rx string) &Client {
 	}
 	nc.opts.allow_reconnect = false
 	nc.connected = true
+	nc.resp_prefix = '_INBOX.t.'
 	return nc
 }
 
@@ -57,8 +58,8 @@ fn sent(nc &Client) string {
 }
 
 fn test_request_keeps_messages_of_other_subscriptions() {
-	// sid 1 = 'foo' subscription, sid 2 = request inbox
-	mut nc := mock_client('PONG\r\nMSG foo 1 5\r\nhello\r\nMSG _INBOX.x 2 3\r\nack\r\nMSG foo 1 5\r\nworld\r\n')
+	// sid 1 = 'foo' subscription, sid 2 = shared response inbox
+	mut nc := mock_client('MSG foo 1 5\r\nhello\r\nMSG _INBOX.t.1 2 3\r\nack\r\nMSG foo 1 5\r\nworld\r\n')
 	sub := nc.subscribe('foo')!
 
 	reply := nc.request_string('svc', 'ping', time.second)!
@@ -70,11 +71,33 @@ fn test_request_keeps_messages_of_other_subscriptions() {
 	assert first.text() == 'hello'
 	second := nc.next_msg()!
 	assert second.text() == 'world'
-	assert sent(nc).contains('UNSUB 2\r\n')
+	out := sent(nc)
+	assert out.contains('SUB _INBOX.t.* 2\r\n')
+	assert out.contains('PUB svc _INBOX.t.1 4\r\n')
+	// single round trip: no PING/flush and no UNSUB per request
+	assert !out.contains('PING')
+	assert !out.contains('UNSUB')
+}
+
+fn test_request_drops_stale_reply_from_timed_out_request() {
+	// _INBOX.t.1 belonged to an earlier request that timed out; its late reply
+	// must be dropped, not returned to request 2 nor buffered for next_msg().
+	mut nc := mock_client('MSG _INBOX.t.1 1 4\r\nlate\r\nMSG _INBOX.t.2 1 2\r\nr2\r\n')
+	nc.resp_seq = 1
+	reply := nc.request_string('svc', 'b', time.second)!
+	assert reply.text() == 'r2'
+	assert nc.pending_msgs.len == 0
+}
+
+fn test_requests_share_one_inbox() {
+	mut nc := mock_client('MSG _INBOX.t.1 1 2\r\nr1\r\nMSG _INBOX.t.2 1 2\r\nr2\r\n')
+	assert nc.request_string('svc', 'a', time.second)!.text() == 'r1'
+	assert nc.request_string('svc', 'b', time.second)!.text() == 'r2'
+	assert sent(nc).count('SUB ') == 1
 }
 
 fn test_request_timeout() {
-	mut nc := mock_client('PONG\r\n')
+	mut nc := mock_client('')
 	nc.request_string('svc', 'ping', time.second) or {
 		assert err.msg() == err_request_timeout
 		return
@@ -84,7 +107,7 @@ fn test_request_timeout() {
 
 fn test_request_no_responders() {
 	hdr := 'NATS/1.0 503\r\n\r\n'
-	mut nc := mock_client('PONG\r\nHMSG _INBOX.x 1 ${hdr.len} ${hdr.len}\r\n${hdr}\r\n')
+	mut nc := mock_client('HMSG _INBOX.t.1 1 ${hdr.len} ${hdr.len}\r\n${hdr}\r\n')
 	nc.request_string('svc', 'ping', time.second) or {
 		assert err.msg() == err_no_responders
 		return
@@ -140,4 +163,103 @@ fn test_fetch_stops_on_no_messages_status() {
 	msgs, errs := js.fetch('ORDERS', 'worker', PullFetchOptions{ batch: 5 })!
 	assert msgs.len == 0
 	assert errs.len == 0
+}
+
+struct AckLog {
+mut:
+	results []string
+}
+
+fn test_publish_async_uses_shared_inbox_and_routes_acks() {
+	ack1 := '{"stream":"S","seq":1}'
+	ack2 := '{"stream":"S","seq":2}'
+	no_stream := 'NATS/1.0 503\r\n\r\n'
+	mut nc := mock_client('MSG _INBOX.t.2 1 ${ack2.len}\r\n${ack2}\r\nMSG _INBOX.t.1 1 ${ack1.len}\r\n${ack1}\r\n' +
+		'HMSG _INBOX.t.3 1 ${no_stream.len} ${no_stream.len}\r\n${no_stream}\r\nMSG foo 2 2\r\nok\r\n')
+	mut js := nc.jetstream()
+	mut log := &AckLog{}
+	cb := fn [mut log] (mut nc Client, subject string, r PublishResult) {
+		if r.error_msg != '' {
+			log.results << '${subject}:err'
+		} else {
+			log.results << '${subject}:${r.ack.seq}'
+		}
+	}
+	js.publish_string_async('a', 'x', cb)!
+	js.publish_string_async('b', 'y', cb)!
+	js.publish_string_async('nostream', 'z', cb)!
+	assert nc.pending_publishes.len == 3
+	nc.subscribe('foo')!
+
+	// next_msg() processes the three ACKs (out of order) and returns 'ok'
+	msg := nc.next_msg()!
+	assert msg.text() == 'ok'
+	assert log.results == ['b:2', 'a:1', 'nostream:err']
+	assert nc.pending_publishes.len == 0
+
+	out := sent(nc)
+	assert out.count('SUB ') == 2 // shared inbox + foo
+	assert !out.contains('PING')
+}
+
+fn test_publish_async_timeout() {
+	mut nc := mock_client('MSG foo 2 2\r\nok\r\n')
+	nc.opts.publish_async_timeout = 0
+	mut js := nc.jetstream()
+	mut log := &AckLog{}
+	js.publish_string_async('a', 'x', fn [mut log] (mut nc Client, subject string, r PublishResult) {
+		log.results << r.error_msg
+	})!
+	nc.subscribe('foo')!
+	time.sleep(2 * time.millisecond)
+	nc.next_msg()!
+	assert log.results.len == 1
+	assert log.results[0].contains('timeout')
+	assert nc.pending_publishes.len == 0
+}
+
+fn test_publish_async_complete_waits_for_all_acks() {
+	ack1 := '{"stream":"S","seq":1}'
+	ack2 := '{"stream":"S","seq":2}'
+	mut nc := mock_client('MSG _INBOX.t.1 1 ${ack1.len}\r\n${ack1}\r\nMSG foo 2 2\r\nok\r\nMSG _INBOX.t.2 1 ${ack2.len}\r\n${ack2}\r\n')
+	mut js := nc.jetstream()
+	mut log := &AckLog{}
+	cb := fn [mut log] (mut nc Client, subject string, r PublishResult) {
+		log.results << '${r.ack.seq}'
+	}
+	js.publish_string_async('a', 'x', cb)!
+	nc.subscribe('foo')!
+	js.publish_string_async('a', 'y', cb)!
+	assert js.publish_async_pending() == 2
+
+	// returns as soon as both ACKs are in, without waiting for the timeout
+	js.publish_async_complete(time.second)!
+	assert log.results == ['1', '2']
+	assert js.publish_async_pending() == 0
+	// the regular message received meanwhile is kept
+	assert nc.next_msg()!.text() == 'ok'
+}
+
+fn test_publish_async_complete_timeout() {
+	mut nc := mock_client('')
+	mut js := nc.jetstream()
+	js.publish_string_async('a', 'x', fn (mut nc Client, subject string, r PublishResult) {})!
+	js.publish_async_complete(20 * time.millisecond) or {
+		assert err.msg().contains('1 async publish(es) still pending')
+		return
+	}
+	assert false
+}
+
+fn test_flush_routes_async_acks() {
+	ack := '{"stream":"S","seq":7}'
+	mut nc := mock_client('MSG _INBOX.t.1 1 ${ack.len}\r\n${ack}\r\nPONG\r\n')
+	mut js := nc.jetstream()
+	mut log := &AckLog{}
+	js.publish_string_async('a', 'x', fn [mut log] (mut nc Client, subject string, r PublishResult) {
+		log.results << '${r.ack.seq}'
+	})!
+	nc.flush()!
+	assert log.results == ['7']
+	assert nc.pending_msgs.len == 0
 }

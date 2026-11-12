@@ -68,13 +68,13 @@ pub fn (mut nc Client) flush() ! {
 			.info {
 				nc.parse_info(frame.payload) or {}
 			}
-			.msg {
-				msg := nc.parse_msg(frame.raw)!
-				nc.pending_msgs << msg
-			}
-			.hmsg {
-				msg := nc.parse_hmsg(frame.raw)!
-				nc.pending_msgs << msg
+			.msg, .hmsg {
+				// Route like next_msg() does: async ACKs run their callback,
+				// other messages are kept for next_msg().
+				msg, deliver := nc.route_msg_frame(frame)!
+				if deliver {
+					nc.pending_msgs << msg
+				}
 			}
 			.unknown {
 				continue

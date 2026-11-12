@@ -23,8 +23,14 @@ mut:
 	next_sid          int            = 1
 	subs              map[string]Subscription
 	pending_msgs      []Msg
-	pending_publishes map[string]PendingPublish // Maps inbox SID to pending async publish
+	pending_publishes map[string]PendingPublish // Maps reply subject to pending async publish
 	connected         bool
+	// Shared response inbox: one `<resp_prefix>*` subscription serves every
+	// request() and publish_async() reply, each on its own `<resp_prefix><n>`.
+	resp_prefix  string
+	resp_sid     string
+	resp_seq     u64
+	resp_waiting string // reply subject request() is currently waiting for
 	// Buffer fields for socket reading
 	rx_buf    []u8
 	rx_offset int

@@ -6,6 +6,8 @@
 
 1. **Async Publish** — `publish_async()` with non-blocking ACK handling
    - Configurable timeout via `Options.publish_async_timeout` (default: 5s)
+   - ACKs are processed when the connection is read: `next_msg()`, `flush()` or `publish_async_complete(timeout)`
+   - All requests and async publishes share one response inbox subscription (`_INBOX.<id>.*`)
    - Automatic callback invocation when ACKs arrive
    - Cleanup of expired pending publishes
    - Full integration tests and examples
