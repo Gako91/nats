@@ -17,21 +17,17 @@ pub fn (mut nc Client) request(subject string, data []u8, timeout time.Duration)
 		nc.set_read_timeout(nc.opts.connect_timeout)
 		nc.unsubscribe(sub) or {}
 	}
-	for {
-		msg := nc.next_msg() or {
-			if is_timeout_error(err) {
-				return error(err_request_timeout)
-			}
-			return err
+	// Messages for other subscriptions arriving meanwhile are kept for next_msg().
+	msg := nc.next_msg_for_sid(sub.sid) or {
+		if is_timeout_error(err) {
+			return error(err_request_timeout)
 		}
-		if msg.sid == sub.sid || msg.subject == inbox {
-			if msg.is_no_responders() {
-				return error(err_no_responders)
-			}
-			return msg
-		}
+		return err
 	}
-	return error(err_request_timeout)
+	if msg.is_no_responders() {
+		return error(err_no_responders)
+	}
+	return msg
 }
 
 // request_string sends a string request and waits for a response.

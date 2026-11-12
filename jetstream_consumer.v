@@ -250,7 +250,7 @@ pub fn (mut js JetStream) fetch(stream_name string, consumer_name string, opts P
 	}
 
 	// Construct the PULL request subject
-	subject := '\$JS.API.CONSUMER.MSG.NEXT.${stream_name}.${consumer_name}'
+	subject := '${js.prefix}.CONSUMER.MSG.NEXT.${stream_name}.${consumer_name}'
 
 	// Create the pull request with batch size and max_bytes
 	mut pull_request_data := '{"batch":${opts.batch}'
@@ -296,21 +296,21 @@ pub fn (mut js JetStream) fetch(stream_name string, consumer_name string, opts P
 
 		js.nc.set_read_timeout(remaining)
 
-		// Get the next message
-		msg := js.nc.next_msg() or {
-			if err.msg().contains('timeout') {
-				break
+		// Get the next message for this pull request only; messages for other
+		// subscriptions are kept for next_msg().
+		msg := js.nc.next_msg_for_sid(sub.sid) or {
+			if !is_timeout_error(err) {
+				errors << err
 			}
-			errors << IError(error(err.msg()))
-			continue
+			break
 		}
 
 		if msg.status == 100 {
 			// Idle heartbeat - continue waiting
 			continue
 		}
-		if msg.status == 408 || msg.status == 409 {
-			// 408 Request Timeout / 409 Batch Complete
+		if msg.status == 404 || msg.status == 408 || msg.status == 409 {
+			// 404 No Messages / 408 Request Timeout / 409 Batch Complete
 			break
 		}
 

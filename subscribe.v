@@ -37,9 +37,11 @@ pub fn (mut nc Client) queue_subscribe(subject string, queue string) !Subscripti
 
 // unsubscribe stops listening on a subscription.
 // After unsubscribe, no new messages for this subject will be received.
+// Messages already buffered for this subscription are discarded.
 pub fn (mut nc Client) unsubscribe(sub Subscription) ! {
-	nc.write('UNSUB ${sub.sid}${crlf}')!
 	nc.subs.delete(sub.sid)
+	nc.pending_msgs = nc.pending_msgs.filter(it.sid != sub.sid)
+	nc.write('UNSUB ${sub.sid}${crlf}')!
 	return
 }
 
@@ -53,7 +55,32 @@ pub fn (mut nc Client) next_msg() !Msg {
 		nc.pending_msgs.delete(0)
 		return msg
 	}
+	return nc.read_next_msg()
+}
 
+// next_msg_for_sid returns the next message for one subscription only.
+// Messages for other subscriptions received meanwhile are buffered in
+// pending_msgs (in order) so a later next_msg() still returns them.
+fn (mut nc Client) next_msg_for_sid(sid string) !Msg {
+	for i, msg in nc.pending_msgs {
+		if msg.sid == sid {
+			nc.pending_msgs.delete(i)
+			return msg
+		}
+	}
+	for {
+		msg := nc.read_next_msg()!
+		if msg.sid == sid {
+			return msg
+		}
+		nc.pending_msgs << msg
+	}
+	return error(err_connection_closed)
+}
+
+// read_next_msg reads protocol frames from the socket until a message for an
+// active subscription arrives. It ignores pending_msgs.
+fn (mut nc Client) read_next_msg() !Msg {
 	for {
 		line := nc.read_line()!
 		if line == '' {
@@ -75,18 +102,19 @@ pub fn (mut nc Client) next_msg() !Msg {
 				nc.parse_info(frame.payload) or {}
 				continue
 			}
-			.msg {
-				msg := nc.parse_msg(frame.raw)!
+			.msg, .hmsg {
+				msg := if frame.op == .msg {
+					nc.parse_msg(frame.raw)!
+				} else {
+					nc.parse_hmsg(frame.raw)!
+				}
 				// Check if this is an async publish ACK response
 				if nc.handle_async_publish_ack(msg) {
 					continue
 				}
-				return msg
-			}
-			.hmsg {
-				msg := nc.parse_hmsg(frame.raw)!
-				// Check if this is an async publish ACK response
-				if nc.handle_async_publish_ack(msg) {
+				// Drop messages still in flight for a subscription that was
+				// already removed (e.g. a late reply after a request timeout).
+				if msg.sid !in nc.subs {
 					continue
 				}
 				return msg
