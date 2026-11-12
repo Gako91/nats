@@ -263,3 +263,38 @@ fn test_flush_routes_async_acks() {
 	assert log.results == ['7']
 	assert nc.pending_msgs.len == 0
 }
+
+struct DisconnectCount {
+mut:
+	n int
+}
+
+fn test_request_timeout_does_not_reconnect() {
+	// Reproduces the CI hang: with allow_reconnect, a read timeout used to be
+	// treated as a lost connection and trigger reconnect() in a loop.
+	mut nc := mock_client('')
+	mut count := &DisconnectCount{}
+	nc.opts.allow_reconnect = true
+	nc.opts.on_disconnect = fn [mut count] (mut c Client) {
+		count.n++
+	}
+	nc.request_string('svc', 'ping', 50 * time.millisecond) or {
+		assert err.msg() == err_request_timeout
+		assert count.n == 0
+		return
+	}
+	assert false
+}
+
+fn test_should_reconnect() {
+	mut nc := mock_client('')
+	nc.opts.allow_reconnect = true
+	assert !nc.should_reconnect(error('net: op timed out'))
+	assert nc.should_reconnect(error('net: socket error: 104'))
+	assert nc.should_reconnect(none)
+	nc.connecting = true
+	assert !nc.should_reconnect(error('net: socket error: 104'))
+	nc.connecting = false
+	nc.opts.allow_reconnect = false
+	assert !nc.should_reconnect(none)
+}

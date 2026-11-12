@@ -25,6 +25,8 @@ mut:
 	pending_msgs      []Msg
 	pending_publishes map[string]PendingPublish // Maps reply subject to pending async publish
 	connected         bool
+	connecting        bool // true while connect_to() runs: no nested reconnect
+	conn_open         bool // conn holds a socket that has not been closed yet
 	// Shared response inbox: one `<resp_prefix>*` subscription serves every
 	// request() and publish_async() reply, each on its own `<resp_prefix><n>`.
 	resp_prefix  string
