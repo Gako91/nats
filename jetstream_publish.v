@@ -42,35 +42,56 @@ pub fn (mut js JetStream) publish_string(subject string, data string) !PubAck {
 	return js.publish(subject, data.bytes())
 }
 
-// publish_async sends a message to a JetStream stream without blocking.
-// The acknowledgment will be received asynchronously and the callback will be invoked.
-// Useful for high-throughput publishing where you don't want to wait for each ACK.
-// The callback is invoked on the reader thread, so keep it fast. Returns immediately.
+// publish_async sends a message to a JetStream stream without waiting for the ACK.
+// The ACK comes back on the client's shared response inbox and `callback` is
+// invoked from next_msg(), flush() or publish_async_complete() when it arrives,
+// or with a timeout error after Options.publish_async_timeout.
+// No SUB/flush per message: the call only writes the PUB and returns.
 pub fn (mut js JetStream) publish_async(subject string, data []u8, callback PublishAckCallback) ! {
-	// Create a unique reply inbox
-	inbox := new_inbox()
-
-	// Subscribe to the reply inbox to receive the ACK
-	sub := js.nc.subscribe(inbox)!
-	js.nc.flush()!
-
-	// Register the pending publish with callback before publishing
-	// Use configurable timeout from Options (default 5s, convert to milliseconds)
-	timeout_ms := js.nc.opts.publish_async_timeout.milliseconds()
-	pending := PendingPublish{
-		inbox:      inbox
+	reply := js.nc.new_resp_subject()!
+	// Register before publishing so a fast ACK always finds its entry.
+	js.nc.pending_publishes[reply] = PendingPublish{
+		inbox:      reply
 		subject:    subject
 		callback:   callback
 		created_at: time.now()
-		timeout_ms: timeout_ms
+		timeout_ms: js.nc.opts.publish_async_timeout.milliseconds()
 	}
-	js.nc.pending_publishes[sub.sid] = pending
+	js.nc.publish_with_reply(subject, reply, data) or {
+		js.nc.pending_publishes.delete(reply)
+		return err
+	}
+}
 
-	// Publish the message with the reply subject
-	// The ACK will come back on the inbox subscription and be handled by next_msg()'s routing
-	js.nc.publish_with_reply(subject, inbox, data)!
+// publish_async_complete processes incoming frames until every pending async
+// publish has completed (callback invoked) or `timeout` elapses. Messages for
+// regular subscriptions received meanwhile are kept for next_msg().
+pub fn (mut js JetStream) publish_async_complete(timeout time.Duration) ! {
+	deadline := time.now().add(timeout)
+	defer {
+		js.nc.set_read_timeout(js.nc.opts.connect_timeout)
+	}
+	for js.nc.pending_publishes.len > 0 {
+		remaining := deadline - time.now()
+		if remaining <= 0 {
+			return error('nats: ${js.nc.pending_publishes.len} async publish(es) still pending after ${timeout}')
+		}
+		js.nc.set_read_timeout(remaining)
+		msg, deliver := js.nc.read_frame() or {
+			if is_timeout_error(err) {
+				continue
+			}
+			return err
+		}
+		if deliver {
+			js.nc.pending_msgs << msg
+		}
+	}
+}
 
-	return
+// publish_async_pending returns the number of async publishes awaiting an ACK.
+pub fn (js &JetStream) publish_async_pending() int {
+	return js.nc.pending_publishes.len
 }
 
 // publish_string_async is a convenience wrapper around publish_async that converts string to bytes.

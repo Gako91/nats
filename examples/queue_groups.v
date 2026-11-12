@@ -19,13 +19,13 @@ fn main() {
 	mode := if args.len > 1 { args[1] } else { 'worker' }
 
 	if mode == 'publisher' {
-		publisher()
+		publisher() or { eprintln('publisher error: ${err}') }
 	} else {
-		worker(mode)
+		worker(mode) or { eprintln('worker error: ${err}') }
 	}
 }
 
-fn publisher() {
+fn publisher() ! {
 	mut nc := nats.connect('nats://127.0.0.1:4222')!
 	defer { nc.close() }
 
@@ -40,7 +40,7 @@ fn publisher() {
 	}
 }
 
-fn worker(name string) {
+fn worker(name string) ! {
 	mut nc := nats.connect('nats://127.0.0.1:4222')!
 	defer { nc.close() }
 

@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Format, build and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # The module is named `nats`, so it must live in a folder named `nats`
+          # for `import nats` to resolve in examples and tests.
+          path: nats
+
+      - name: Install V
+        run: |
+          git clone --depth 1 https://github.com/vlang/v "$RUNNER_TEMP/v"
+          make -C "$RUNNER_TEMP/v"
+          echo "$RUNNER_TEMP/v" >> "$GITHUB_PATH"
+
+      - name: Check formatting
+        working-directory: nats
+        run: v fmt -verify .
+
+      - name: Unit tests
+        working-directory: nats
+        run: v test *_test.v
+
+      - name: Compile examples, benchmarks and integration tests
+        working-directory: nats
+        run: |
+          for f in examples/*.v benchmarks/*.v tests/*.v; do
+            echo "::group::$f"
+            v -check -path "@vlib|${{ github.workspace }}" "$f"
+            echo "::endgroup::"
+          done
+
+  integration:
+    name: Integration tests (NATS + JetStream)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: nats
+
+      - name: Install V
+        run: |
+          git clone --depth 1 https://github.com/vlang/v "$RUNNER_TEMP/v"
+          make -C "$RUNNER_TEMP/v"
+          echo "$RUNNER_TEMP/v" >> "$GITHUB_PATH"
+
+      - name: Start NATS server
+        run: |
+          docker run -d --name nats -p 4222:4222 nats:2.14-alpine -js
+          for i in $(seq 1 20); do
+            nc -z 127.0.0.1 4222 && exit 0
+            sleep 1
+          done
+          echo "NATS did not start" && docker logs nats && exit 1
+
+      - name: Integration tests
+        working-directory: nats
+        env:
+          NATS_INTEGRATION: '1'
+          NATS_URL: nats://127.0.0.1:4222
+        run: v -path "@vlib|${{ github.workspace }}" test tests/
+
+      - name: NATS logs on failure
+        if: failure()
+        run: docker logs nats

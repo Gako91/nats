@@ -35,7 +35,7 @@ pub fn connect_with_options(opts Options) !Client {
 pub fn (mut nc Client) close() {
 	if nc.connected {
 		nc.connected = false
-		nc.conn.close() or {}
+		nc.close_conn()
 		if cb := nc.opts.on_close {
 			cb(mut nc)
 		}
@@ -68,13 +68,13 @@ pub fn (mut nc Client) flush() ! {
 			.info {
 				nc.parse_info(frame.payload) or {}
 			}
-			.msg {
-				msg := nc.parse_msg(frame.raw)!
-				nc.pending_msgs << msg
-			}
-			.hmsg {
-				msg := nc.parse_hmsg(frame.raw)!
-				nc.pending_msgs << msg
+			.msg, .hmsg {
+				// Route like next_msg() does: async ACKs run their callback,
+				// other messages are kept for next_msg().
+				msg, deliver := nc.route_msg_frame(frame)!
+				if deliver {
+					nc.pending_msgs << msg
+				}
 			}
 			.unknown {
 				continue
@@ -119,14 +119,14 @@ fn (mut nc Client) read_line() !string {
 			nc.rx_offset = 0
 			nc.rx_len = 0
 			n := nc.conn.read(mut nc.rx_buf) or {
-				if nc.opts.allow_reconnect {
+				if nc.should_reconnect(err) {
 					nc.reconnect()!
 					continue
 				}
 				return err
 			}
 			if n == 0 {
-				if nc.opts.allow_reconnect {
+				if nc.should_reconnect(none) {
 					nc.reconnect()!
 					continue
 				}
@@ -175,14 +175,14 @@ fn (mut nc Client) read_exact(size int) ![]u8 {
 
 	for read < size {
 		n := nc.conn.read(mut data[read..]) or {
-			if nc.opts.allow_reconnect {
+			if nc.should_reconnect(err) {
 				nc.reconnect()!
 				return error(err_connection_closed)
 			}
 			return err
 		}
 		if n == 0 {
-			if nc.opts.allow_reconnect {
+			if nc.should_reconnect(none) {
 				nc.reconnect()!
 				return error(err_connection_closed)
 			}
@@ -194,13 +194,27 @@ fn (mut nc Client) read_exact(size int) ![]u8 {
 	return data
 }
 
+// should_reconnect tells whether a failed socket operation must trigger a
+// reconnect. Timeouts never do: they are normal for request(), fetch(),
+// next_msg() and must be returned to the caller. No nested reconnect is
+// attempted while a connection is being established.
+fn (nc &Client) should_reconnect(err ?IError) bool {
+	if !nc.opts.allow_reconnect || nc.connecting {
+		return false
+	}
+	if e := err {
+		return !is_timeout_error(e)
+	}
+	return true
+}
+
 fn (mut nc Client) write(s string) ! {
 	nc.write_bytes(s.bytes())!
 }
 
 fn (mut nc Client) write_bytes(data []u8) ! {
 	nc.conn.write(data) or {
-		if nc.opts.allow_reconnect {
+		if nc.should_reconnect(err) {
 			nc.reconnect()!
 			nc.conn.write(data)!
 			return
@@ -228,6 +242,10 @@ pub fn (mut nc Client) set_write_timeout(t time.Duration) {
 // Internal connection helpers
 
 fn (mut nc Client) connect_to(opts Options) ! {
+	nc.connecting = true
+	defer {
+		nc.connecting = false
+	}
 	address := address_from_url(opts.url)!
 	hostname := hostname_from_url(opts.url)!
 
@@ -236,6 +254,7 @@ fn (mut nc Client) connect_to(opts Options) ! {
 	conn.set_write_timeout(opts.connect_timeout)
 
 	nc.conn = conn
+	nc.conn_open = true
 
 	// Reset the rx buffers for the new socket
 	nc.rx_offset = 0
@@ -253,6 +272,15 @@ fn (mut nc Client) connect_to(opts Options) ! {
 	}
 	nc.opts = final_opts
 
+	nc.handshake(opts, hostname) or {
+		// Do not leak the socket of a failed attempt
+		nc.close_conn()
+		return err
+	}
+	nc.connected = true
+}
+
+fn (mut nc Client) handshake(opts Options, hostname string) ! {
 	nc.read_info()!
 
 	// Upgrade to TLS if required by the server or forced/requested by options
@@ -262,7 +290,6 @@ fn (mut nc Client) connect_to(opts Options) ! {
 
 	nc.send_connect()!
 	nc.flush()!
-	nc.connected = true
 }
 
 fn (mut nc Client) upgrade_to_tls(hostname string) ! {
@@ -283,6 +310,8 @@ pub fn (mut nc Client) reconnect() ! {
 	}
 
 	nc.connected = false
+	// Release the broken socket before dialing a new one
+	nc.close_conn()
 	if cb := nc.opts.on_disconnect {
 		cb(mut nc)
 	}
@@ -314,7 +343,9 @@ pub fn (mut nc Client) reconnect() ! {
 
 			// Connection succeeded! Restore subscriptions.
 			nc.restore_subscriptions() or {
-				nc.close()
+				// Not a user close: drop the socket without calling on_close
+				nc.connected = false
+				nc.close_conn()
 				if cb := nc.opts.on_error {
 					cb(mut nc, 'failed to restore subscriptions on ${url}: ${err}')
 				}
@@ -344,5 +375,14 @@ fn (mut nc Client) restore_subscriptions() ! {
 }
 
 pub fn (mut nc Client) disconnect_for_testing() ! {
-	nc.conn.close()!
+	nc.close_conn()
+}
+
+// close_conn closes the current socket once. Closing an already closed file
+// descriptor could close another socket that reused the same number.
+fn (mut nc Client) close_conn() {
+	if nc.conn_open {
+		nc.conn_open = false
+		nc.conn.close() or {}
+	}
 }

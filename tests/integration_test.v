@@ -92,6 +92,12 @@ fn test_integration_publish_subscribe() {
 	assert msg.text() == 'hello integration'
 }
 
+struct AsyncAckState {
+mut:
+	acks   []nats.PubAck
+	errors []string
+}
+
 struct CallbackCounter {
 mut:
 	disconnects int
@@ -156,42 +162,33 @@ fn test_integration_jetstream_async_publish() {
 
 	mut js := nc.jetstream()
 
-	// Create a test stream
 	stream_name := 'test_async_${rand.ulid()}'
+	subject := 'test.async.${stream_name}'
 	js.add_stream(nats.StreamConfig{
 		name:     stream_name
-		subjects: ['test.async.>${stream_name}']
-	}) or { return }
+		subjects: [subject]
+	})!
+	defer { js.delete_stream(stream_name) or {} }
 
-	// Set up to capture callback results
-	mut callback_invoked := false
-	mut callback_ack := nats.PubAck{}
-	mut callback_error := ''
-
-	// Define the async publish callback
-	async_callback := fn [mut callback_invoked, mut callback_ack, mut callback_error] (mut c nats.Client, subject string, result nats.PublishResult) {
-		callback_invoked = true
+	// Closures copy captured values: use a heap struct to collect results
+	mut state := &AsyncAckState{}
+	async_callback := fn [mut state] (mut c nats.Client, subject string, result nats.PublishResult) {
 		if result.error_msg != '' {
-			callback_error = result.error_msg
+			state.errors << result.error_msg
 		} else {
-			callback_ack = result.ack
+			state.acks << result.ack
 		}
 	}
 
-	// Publish async
-	subject := 'test.async.${stream_name}'
-	js.publish_string_async(subject, 'test message', async_callback) or {
-		panic('failed to publish async: ${err}')
-	}
+	js.publish_string_async(subject, 'test message', async_callback)!
 
-	// Give the callback a moment to be invoked (it runs on the reader thread)
-	time.sleep(100 * time.millisecond)
+	// Process incoming ACKs until none is pending
+	js.publish_async_complete(5 * time.second)!
 
-	// Check that the callback was invoked
-	assert callback_invoked == true, 'callback was not invoked'
-	assert callback_error == '', 'callback had an error: ${callback_error}'
-	assert callback_ack.stream == stream_name, 'ack stream name mismatch'
-	assert callback_ack.seq > 0, 'ack seq should be > 0'
+	assert state.errors.len == 0, 'callback had an error: ${state.errors}'
+	assert state.acks.len == 1, 'callback was not invoked'
+	assert state.acks[0].stream == stream_name, 'ack stream name mismatch'
+	assert state.acks[0].seq > 0, 'ack seq should be > 0'
 }
 
 fn test_integration_jetstream_async_publish_multiple() {
@@ -205,44 +202,36 @@ fn test_integration_jetstream_async_publish_multiple() {
 
 	mut js := nc.jetstream()
 
-	// Create a test stream
 	stream_name := 'test_async_multi_${rand.ulid()}'
+	subject := 'test.multi.${stream_name}'
 	js.add_stream(nats.StreamConfig{
 		name:     stream_name
-		subjects: ['test.multi.>${stream_name}']
-	}) or { return }
+		subjects: [subject]
+	})!
+	defer { js.delete_stream(stream_name) or {} }
 
-	// Track all acks
-	mut acks := []nats.PubAck{}
-	mut errors := []string{}
-
-	// Create callback
-	async_callback := fn [mut acks, mut errors] (mut c nats.Client, subject string, result nats.PublishResult) {
+	mut state := &AsyncAckState{}
+	async_callback := fn [mut state] (mut c nats.Client, subject string, result nats.PublishResult) {
 		if result.error_msg != '' {
-			errors << result.error_msg
+			state.errors << result.error_msg
 		} else {
-			acks << result.ack
+			state.acks << result.ack
 		}
 	}
 
-	// Publish multiple messages async
-	subject := 'test.multi.${stream_name}'
 	for i := 0; i < 5; i++ {
-		js.publish_string_async(subject, 'message ${i}', async_callback) or {
-			panic('failed to publish: ${err}')
-		}
+		js.publish_string_async(subject, 'message ${i}', async_callback)!
 	}
+	assert js.publish_async_pending() == 5
 
-	// Wait for all acks to arrive
-	time.sleep(500 * time.millisecond)
+	js.publish_async_complete(5 * time.second)!
 
-	// Verify all acks received
-	assert acks.len == 5, 'expected 5 acks, got ${acks.len}'
-	assert errors.len == 0, 'expected no errors, got ${errors.len}: ${errors}'
+	assert state.acks.len == 5, 'expected 5 acks, got ${state.acks.len}'
+	assert state.errors.len == 0, 'expected no errors, got ${state.errors.len}: ${state.errors}'
 
 	// Verify sequences are in order
-	for i in 1 .. acks.len {
-		assert acks[i].seq > acks[i - 1].seq, 'sequences not in order'
+	for i in 1 .. state.acks.len {
+		assert state.acks[i].seq > state.acks[i - 1].seq, 'sequences not in order'
 	}
 }
 

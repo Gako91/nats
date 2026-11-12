@@ -73,4 +73,3 @@ fn validate_subject(subject string) ! {
 	}
 	return
 }
-

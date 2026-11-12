@@ -57,4 +57,3 @@ fn test_hostname_and_address_from_url() {
 	assert address_from_url('nats://localhost')! == 'localhost:4222'
 	assert hostname_from_url('nats://user:pass@myhost:4222')! == 'myhost'
 }
-
